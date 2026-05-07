@@ -130,11 +130,24 @@ function App() {
   }
 
   async function createCandidateHiringNeed() {
-    const seed = await api.seedDemo();
-    const [nextNeed, nextShortlist] = await Promise.all([
-      api.hiringNeed(seed.hiring_need_id),
-      api.shortlist(seed.hiring_need_id),
-    ]);
+    const poolEmployer = await api.employerAuth({
+      user: {
+        full_name: "Sabixa Assessment Pool",
+        email: "assessment-pool@sabixa.africa",
+        role: "employer",
+      },
+      company_name: "Sabixa Assessment Pool",
+      company_type: "Assessment workspace",
+      sector: "Customer support",
+      support_channel: intakeDefaults.channels,
+      customer_volume: intakeDefaults.weekly_ticket_volume,
+    });
+    const nextNeed = await api.createHiringNeed({
+      employer_id: poolEmployer.id,
+      rough_jd: `${currentTrack?.title ?? "Customer support"} assessment pool`,
+      intake_answers: intakeDefaults,
+    });
+    const nextShortlist = await api.globalShortlist();
     setHiringNeed(nextNeed);
     setShortlist(nextShortlist);
     setTaskIndex(0);
@@ -157,7 +170,7 @@ function App() {
     setError("");
     try {
       const activeNeed = await createCandidateHiringNeed();
-      const activeShortlist = await api.shortlist(activeNeed.id);
+      const activeShortlist = await api.globalShortlist();
       const auth = await api.candidateAuth({
         ...candidateForm,
         email: uniqueEmail(candidateForm.email),
@@ -218,7 +231,7 @@ function App() {
         answer: answer.trim(),
       });
       const [nextShortlist, nextPassport] = await Promise.all([
-        api.shortlist(activeNeed.id),
+        api.globalShortlist(),
         api.getPassport(result.passport.id),
       ]);
       const nextSubmissions = upsertSubmission(candidateSubmissions, result);
@@ -391,7 +404,7 @@ function App() {
         rough_jd: `${currentTrack?.title ?? "Customer support"} role for ${employerForm.company_name}`,
         intake_answers: intakeForm,
       });
-      const nextShortlist = await api.shortlist(nextNeed.id);
+      const nextShortlist = await api.globalShortlist();
       setHiringNeed(nextNeed);
       setShortlist(nextShortlist);
       setSelectedPassport(null);
@@ -421,7 +434,7 @@ function App() {
     setLoading("Refreshing candidates");
     setError("");
     try {
-      const nextShortlist = await api.shortlist(hiringNeed.id);
+      const nextShortlist = await api.globalShortlist();
       setShortlist(nextShortlist);
       if (employer) {
         saveEmployerSession({

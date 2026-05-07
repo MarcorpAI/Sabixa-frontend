@@ -269,6 +269,7 @@ export const api = {
   seedDemo: () => request<DemoSeed>("/demo/seed", { method: "POST" }),
   hiringNeed: (id: number) => request<HiringNeed>(`/hiring-needs/${id}`),
   shortlist: (id: number) => request<ShortlistCandidate[]>(`/hiring-needs/${id}/shortlist`),
+  globalShortlist: () => request<ShortlistCandidate[]>("/shortlist"),
   getPassport: (id: number) => request<SkillPassport>(`/skill-passports/${id}`),
   candidateAuth: (payload: {
     full_name: string;
