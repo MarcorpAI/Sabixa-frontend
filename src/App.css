@@ -103,7 +103,14 @@ p {
   background: transparent;
   padding: 0;
   min-height: auto;
-  font-size: 1.1rem;
+  display: inline-flex;
+  align-items: center;
+}
+
+.brand-button img {
+  width: 84px;
+  height: auto;
+  display: block;
 }
 
 .topbar-actions,
@@ -115,13 +122,12 @@ p {
 }
 
 .hero {
-  min-height: 100vh;
+  min-height: calc(100vh - 98px);
   max-width: 760px;
-  padding: 18vh 24px 12vh;
+  padding: 12vh 24px 12vh;
   margin: 0 auto;
 }
 
-.brand,
 .small-label {
   color: #60705f;
   font-size: 0.78rem;
@@ -138,7 +144,7 @@ p {
   letter-spacing: 0;
 }
 
-.hero p:not(.brand) {
+.hero p {
   max-width: 560px;
   color: #3f4740;
   font-size: 1.1rem;
@@ -357,7 +363,7 @@ p {
 
 .passport-score {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
 }
 

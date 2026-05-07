@@ -589,25 +589,22 @@ function App() {
         </div>
       ) : null}
 
-      {view !== "home" ? (
-        <header className="topbar">
-          <button className="brand-button" onClick={() => setView("home")}>
-            Sabixa
-          </button>
-          <div className="topbar-actions">
-            <button onClick={startCandidate}>Candidate</button>
-            <button onClick={startEmployer}>Employer</button>
-            {view === "candidate" && candidate ? <button onClick={logoutCandidate}>Logout</button> : null}
-            {view === "employer" && employer ? <button onClick={logoutEmployer}>Logout</button> : null}
-          </div>
-        </header>
-      ) : null}
+      <header className="topbar">
+        <button className="brand-button" onClick={() => setView("home")}>
+          <img src="/sabixalogo.svg" alt="Sabixa" />
+        </button>
+        <div className="topbar-actions">
+          <button onClick={startCandidate}>Candidate</button>
+          <button onClick={startEmployer}>Employer</button>
+          {view === "candidate" && candidate ? <button onClick={logoutCandidate}>Logout</button> : null}
+          {view === "employer" && employer ? <button onClick={logoutEmployer}>Logout</button> : null}
+        </div>
+      </header>
 
       {error ? <div className="notice notice-error">{error}</div> : null}
 
       {view === "home" ? (
         <main className="hero">
-          <p className="brand">Sabixa</p>
           <h1>Proof-of-skill passports for customer support hiring.</h1>
           <p>
             Candidates complete real support tasks. AI scores the work and turns the result into
@@ -1028,10 +1025,6 @@ function PassportCard({ passport }: { passport: SkillPassport }) {
         <div>
           <small>Action</small>
           <strong>{summary.recommended_action ?? "Review"}</strong>
-        </div>
-        <div>
-          <small>Scoring engine</small>
-          <strong>{summary.evaluation_provider === "groq" ? "Groq AI" : "Fallback"}</strong>
         </div>
       </div>
       {Object.keys(scoreBreakdown).length > 0 ? (

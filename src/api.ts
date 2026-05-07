@@ -252,9 +252,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
       ...rest,
     });
   } catch (error) {
-    throw new Error(
-      `Could not reach backend at ${API_BASE_URL}${path}. Check VITE_API_BASE_URL, backend deploy status, and CORS.`
-    );
+    throw new Error("Unable to load data right now. Please try again.");
   }
 
   if (!response.ok) {
