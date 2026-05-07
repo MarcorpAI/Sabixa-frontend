@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
-import { api, RoleTrack, HiringNeed, SubmissionResult, ShortlistCandidate } from "./api";
+import type { RoleTrack, HiringNeed, SubmissionResult, ShortlistCandidate } from "./api";
+import { api } from "./api";
 import "./App.css";
 
 type Mode = "start" | "candidate" | "employer";
@@ -15,7 +16,7 @@ function App() {
   const [taskIndex, setTaskIndex] = useState(0);
   const [aiStatus, setAiStatus] = useState("checking");
 
-  const [profile, setProfile] = useState({ full_name: "", email: "", location: "", experience: "" });
+  const [profile, setProfile] = useState({ full_name: "Candidate", email: "test@test.com", location: "Nigeria", experience: "Customer support" });
   const [answer, setAnswer] = useState("");
 
   const task = hiringNeed?.tasks[taskIndex];
@@ -156,7 +157,7 @@ function App() {
             ))}
           </div>
           <h3>Task Pack</h3>
-          {hiringNeed?.tasks.map((t, i) => (
+          {hiringNeed?.tasks.map((t) => (
             <div key={t.id} className="task-item">
               <strong>{t.title}</strong>
               <span>{t.time_limit_minutes}m</span>
