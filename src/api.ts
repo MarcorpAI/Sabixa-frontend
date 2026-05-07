@@ -241,17 +241,24 @@ type RequestOptions = RequestInit & {
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { skipJson, headers, ...rest } = options;
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...headers,
-    },
-    ...rest,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...headers,
+      },
+      ...rest,
+    });
+  } catch (error) {
+    throw new Error(
+      `Could not reach backend at ${API_BASE_URL}${path}. Check VITE_API_BASE_URL, backend deploy status, and CORS.`
+    );
+  }
 
   if (!response.ok) {
     const message = await response.text();
-    throw new Error(message || `${path} failed with ${response.status}`);
+    throw new Error(message || `${path} failed with status ${response.status}`);
   }
 
   if (skipJson || response.status === 204) {

@@ -50,12 +50,14 @@ button:hover {
 input,
 textarea,
 select {
+  min-height: 46px;
   width: 100%;
   border: 1px solid #d9ded2;
   border-radius: 8px;
   background: #ffffff;
   color: #161a1d;
   padding: 11px 12px;
+  appearance: auto;
 }
 
 textarea {

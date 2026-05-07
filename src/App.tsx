@@ -51,6 +51,16 @@ const employerDefaults = {
   company_name: "Kori Market",
 };
 
+const fallbackTrack: RoleTrack = {
+  id: "customer-support-associate",
+  title: "Customer Support Associate",
+  role_family: "Customer support / customer operations",
+  summary: "Customer support task track.",
+  task_count: 3,
+  benchmark: "2 tasks with 70+ average",
+  competencies: ["Empathy", "Clarity", "Ownership", "Escalation judgement"],
+};
+
 const intakeDefaults: IntakeAnswers = {
   why_hiring_now: "Support messages are increasing and delayed responses are causing refunds.",
   company_stage: "Growing ecommerce SME serving mobile-first customers.",
@@ -90,7 +100,9 @@ function App() {
   const [passport, setPassport] = useState<SkillPassport | null>(null);
   const [selectedPassport, setSelectedPassport] = useState<SkillPassport | null>(null);
 
-  const currentTrack = tracks.find((track) => track.id === selectedTrackId) ?? tracks[0] ?? null;
+  const roleTrackOptions = tracks.length > 0 ? tracks : [fallbackTrack];
+  const currentTrack =
+    roleTrackOptions.find((track) => track.id === selectedTrackId) ?? roleTrackOptions[0];
   const currentTask = hiringNeed?.tasks[taskIndex] ?? null;
   const passportUrl = passport
     ? `${window.location.origin}${window.location.pathname}?passport=${passport.id}`
@@ -616,6 +628,19 @@ function App() {
               <h2>Candidate onboarding</h2>
               <p className="muted">Start with the customer support associate task track.</p>
               <label>
+                Job category
+                <select
+                  value={selectedTrackId}
+                  onChange={(event) => setSelectedTrackId(event.target.value)}
+                >
+                  {roleTrackOptions.map((track) => (
+                    <option key={track.id} value={track.id}>
+                      {track.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
                 Full name
                 <input
                   value={candidateForm.full_name}
@@ -791,7 +816,7 @@ function App() {
                   value={selectedTrackId}
                   onChange={(event) => setSelectedTrackId(event.target.value)}
                 >
-                  {tracks.map((track) => (
+                  {roleTrackOptions.map((track) => (
                     <option key={track.id} value={track.id}>
                       {track.title}
                     </option>
@@ -817,7 +842,7 @@ function App() {
                   value={selectedTrackId}
                   onChange={(event) => setSelectedTrackId(event.target.value)}
                 >
-                  {tracks.map((track) => (
+                  {roleTrackOptions.map((track) => (
                     <option key={track.id} value={track.id}>
                       {track.title}
                     </option>
