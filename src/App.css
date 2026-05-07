@@ -160,6 +160,10 @@ p {
   gap: 15px;
 }
 
+.intake-panel {
+  max-width: 640px;
+}
+
 .panel h2 {
   margin-bottom: 6px;
   font-size: 1.6rem;
@@ -308,6 +312,23 @@ ul {
 .candidate-list {
   display: grid;
   gap: 10px;
+}
+
+.skill-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+
+.skill-strip span {
+  padding: 7px 10px;
+  border: 1px solid #d9ded2;
+  border-radius: 999px;
+  background: #fafbf8;
+  color: #3f4740;
+  font-size: 0.86rem;
+  font-weight: 700;
 }
 
 .candidate-row {

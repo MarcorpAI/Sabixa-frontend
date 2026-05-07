@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import {
   api,
   type Candidate,
+  type EmployerProfile,
   type HiringNeed,
+  type IntakeAnswers,
   type RoleTrack,
   type ShortlistCandidate,
   type SkillPassport,
@@ -12,7 +14,7 @@ import "./App.css";
 
 type View = "home" | "candidate" | "employer" | "shared-passport";
 type CandidateStep = "onboarding" | "task" | "score" | "passport";
-type EmployerStep = "login" | "shortlist";
+type EmployerStep = "login" | "intake" | "shortlist";
 
 const candidateDefaults = {
   full_name: "Zainab Afolayan",
@@ -27,6 +29,18 @@ const employerDefaults = {
   company_name: "Kori Market",
 };
 
+const intakeDefaults: IntakeAnswers = {
+  why_hiring_now: "Support messages are increasing and delayed responses are causing refunds.",
+  company_stage: "Growing ecommerce SME serving mobile-first customers.",
+  channels: ["WhatsApp", "Email"],
+  common_issues: "Delayed deliveries, refund pressure, missing updates, wrong item complaints.",
+  weekly_ticket_volume: "250 to 400 messages weekly",
+  bad_hire_cost: "Refund losses, angry reviews, churn, and poor operations handoff.",
+  first_30_days: "Reply to WhatsApp complaints and escalate urgent refund cases correctly.",
+  tools_or_processes: "WhatsApp Business, Google Sheets, courier notes, refund checklist.",
+  priority_skills: ["Empathy", "Clarity", "Ownership", "Escalation judgement"],
+};
+
 function App() {
   const [view, setView] = useState<View>("home");
   const [candidateStep, setCandidateStep] = useState<CandidateStep>("onboarding");
@@ -38,7 +52,9 @@ function App() {
   const [selectedTrackId, setSelectedTrackId] = useState("customer-support-associate");
   const [candidateForm, setCandidateForm] = useState(candidateDefaults);
   const [employerForm, setEmployerForm] = useState(employerDefaults);
+  const [intakeForm, setIntakeForm] = useState<IntakeAnswers>(intakeDefaults);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
+  const [employer, setEmployer] = useState<EmployerProfile | null>(null);
   const [hiringNeed, setHiringNeed] = useState<HiringNeed | null>(null);
   const [shortlist, setShortlist] = useState<ShortlistCandidate[]>([]);
   const [taskIndex, setTaskIndex] = useState(0);
@@ -204,10 +220,10 @@ function App() {
   }
 
   async function loginEmployer() {
-    setLoading("Loading candidates");
+    setLoading("Starting employer session");
     setError("");
     try {
-      await api.employerAuth({
+      const nextEmployer = await api.employerAuth({
         user: {
           full_name: employerForm.full_name,
           email: employerForm.email,
@@ -219,12 +235,36 @@ function App() {
         support_channel: ["WhatsApp", "Email"],
         customer_volume: "Hiring pipeline",
       });
-      const nextNeed = await ensureDemoData();
-      const nextShortlist = await api.shortlist(nextNeed.id);
-      setShortlist(nextShortlist);
-      setEmployerStep("shortlist");
+      setEmployer(nextEmployer);
+      setEmployerStep("intake");
     } catch (employerError) {
-      setError(readError(employerError, "Could not load employer shortlist."));
+      setError(readError(employerError, "Could not start employer session."));
+    } finally {
+      setLoading("");
+    }
+  }
+
+  async function submitHiringNeed() {
+    if (!employer) {
+      setError("Login as employer first.");
+      return;
+    }
+
+    setLoading("Generating task pack");
+    setError("");
+    try {
+      const nextNeed = await api.createHiringNeed({
+        employer_id: employer.id,
+        rough_jd: `${currentTrack?.title ?? "Customer support"} role for ${employerForm.company_name}`,
+        intake_answers: intakeForm,
+      });
+      const nextShortlist = await api.shortlist(nextNeed.id);
+      setHiringNeed(nextNeed);
+      setShortlist(nextShortlist);
+      setSelectedPassport(null);
+      setEmployerStep("shortlist");
+    } catch (intakeError) {
+      setError(readError(intakeError, "Could not create hiring need."));
     } finally {
       setLoading("");
     }
@@ -493,7 +533,72 @@ function App() {
                 </select>
               </label>
               <button className="primary" onClick={loginEmployer}>
-                See rated candidates
+                Continue
+              </button>
+            </section>
+          ) : null}
+
+          {employerStep === "intake" ? (
+            <section className="panel narrow intake-panel">
+              <h2>Hiring need intake</h2>
+              <p className="muted">
+                Describe the support problem behind the role. Sabixa uses this to generate the
+                assessment context.
+              </p>
+              <label>
+                Job category
+                <select
+                  value={selectedTrackId}
+                  onChange={(event) => setSelectedTrackId(event.target.value)}
+                >
+                  {tracks.map((track) => (
+                    <option key={track.id} value={track.id}>
+                      {track.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Why are you hiring now?
+                <textarea
+                  rows={3}
+                  value={intakeForm.why_hiring_now}
+                  onChange={(event) =>
+                    setIntakeForm({ ...intakeForm, why_hiring_now: event.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Common customer issues
+                <textarea
+                  rows={3}
+                  value={intakeForm.common_issues}
+                  onChange={(event) =>
+                    setIntakeForm({ ...intakeForm, common_issues: event.target.value })
+                  }
+                />
+              </label>
+              <label>
+                First 30 days
+                <textarea
+                  rows={3}
+                  value={intakeForm.first_30_days}
+                  onChange={(event) =>
+                    setIntakeForm({ ...intakeForm, first_30_days: event.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Weekly ticket volume
+                <input
+                  value={intakeForm.weekly_ticket_volume}
+                  onChange={(event) =>
+                    setIntakeForm({ ...intakeForm, weekly_ticket_volume: event.target.value })
+                  }
+                />
+              </label>
+              <button className="primary" onClick={submitHiringNeed}>
+                Generate shortlist view
               </button>
             </section>
           ) : null}
@@ -505,9 +610,17 @@ function App() {
                   <div>
                     <span className="small-label">Rated candidates</span>
                     <h2>{currentTrack?.title ?? "Customer Support Associate"}</h2>
+                    {hiringNeed ? <p className="muted">{hiringNeed.role_problem_summary}</p> : null}
                   </div>
                   <button onClick={refreshShortlist}>Refresh</button>
                 </div>
+                {hiringNeed ? (
+                  <div className="skill-strip">
+                    {hiringNeed.skill_map.slice(0, 4).map((skill) => (
+                      <span key={skill.competency}>{skill.competency}</span>
+                    ))}
+                  </div>
+                ) : null}
                 <div className="candidate-list">
                   {shortlist.length === 0 ? <p className="muted">No rated candidates yet.</p> : null}
                   {shortlist.map((candidateItem) => (
