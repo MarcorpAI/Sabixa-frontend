@@ -16,7 +16,6 @@ function App() {
   const [taskIndex, setTaskIndex] = useState(0);
   const [aiStatus, setAiStatus] = useState("checking");
 
-  const [profile, setProfile] = useState({ full_name: "Candidate", email: "test@test.com", location: "Nigeria", experience: "Customer support" });
   const [answer, setAnswer] = useState("");
 
   const task = hiringNeed?.tasks[taskIndex];
@@ -27,8 +26,8 @@ function App() {
   }, []);
 
   async function startCandidate() {
-    if (!profile.full_name || !profile.email || !profile.location) {
-      setError("Please fill all fields");
+    if (!tracks[0]) {
+      setError("Loading...");
       return;
     }
     setLoading("Preparing...");
@@ -36,7 +35,13 @@ function App() {
     try {
       const seeded = await api.seedDemo();
       const need = await api.hiringNeed(seeded.hiring_need_id);
-      await api.candidateAuth({ ...profile, role_track_id: tracks[0]?.id || "customer-support-associate" });
+      await api.candidateAuth({ 
+        full_name: "Demo Candidate", 
+        email: "demo@sabixa.com", 
+        location: "Nigeria", 
+        experience: "Customer support",
+        role_track_id: tracks[0].id 
+      });
       setHiringNeed(need);
       setShortlist(seeded.shortlist);
       setMode("candidate");
