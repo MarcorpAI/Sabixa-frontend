@@ -143,6 +143,17 @@ export type SubmissionResult = {
   };
 };
 
+export type SkillPassport = {
+  id: number;
+  candidate_id: number;
+  submission_id: number;
+  public_summary: Record<string, string>;
+  strengths: string[];
+  gaps: string[];
+  evidence_preview: string;
+  created_at: string;
+};
+
 export type ShortlistCandidate = {
   candidate_id: number;
   candidate_name: string;
@@ -247,6 +258,7 @@ export const api = {
   seedDemo: () => request<DemoSeed>("/demo/seed", { method: "POST" }),
   hiringNeed: (id: number) => request<HiringNeed>(`/hiring-needs/${id}`),
   shortlist: (id: number) => request<ShortlistCandidate[]>(`/hiring-needs/${id}/shortlist`),
+  getPassport: (id: number) => request<SkillPassport>(`/skill-passports/${id}`),
   candidateAuth: (payload: {
     full_name: string;
     email: string;
