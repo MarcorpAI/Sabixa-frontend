@@ -582,6 +582,13 @@ function App() {
 
   return (
     <div className="app-shell">
+      {loading ? (
+        <div className="loading-overlay" role="status" aria-live="polite">
+          <span className="spinner" />
+          {loading}
+        </div>
+      ) : null}
+
       {view !== "home" ? (
         <header className="topbar">
           <button className="brand-button" onClick={() => setView("home")}>
@@ -596,7 +603,6 @@ function App() {
         </header>
       ) : null}
 
-      {loading ? <div className="notice">{loading}</div> : null}
       {error ? <div className="notice notice-error">{error}</div> : null}
 
       {view === "home" ? (
@@ -677,8 +683,8 @@ function App() {
                   }
                 />
               </label>
-              <button className="primary" onClick={loginCandidate}>
-                {candidate ? "Continue session" : "Continue to task"}
+              <button className="primary" onClick={loginCandidate} disabled={Boolean(loading)}>
+                {loading ? "Setting up..." : candidate ? "Continue session" : "Continue to task"}
               </button>
             </section>
           ) : null}
@@ -716,9 +722,13 @@ function App() {
                 />
               </label>
               <div className="button-row">
-                {taskIndex > 0 ? <button onClick={goToPreviousTask}>Previous task</button> : null}
-                <button className="primary" onClick={submitTask}>
-                  Submit for AI review
+                {taskIndex > 0 ? (
+                  <button onClick={goToPreviousTask} disabled={Boolean(loading)}>
+                    Previous task
+                  </button>
+                ) : null}
+                <button className="primary" onClick={submitTask} disabled={Boolean(loading)}>
+                  {loading ? "Scoring..." : "Submit for AI review"}
                 </button>
               </div>
             </section>
@@ -744,11 +754,15 @@ function App() {
                 <p>{submission.evaluation.parsed_json.confidence_reason}</p>
               </div>
               <div className="button-row">
-                <button onClick={returnToCurrentTask}>Back to task</button>
-                <button className="primary" onClick={continueAfterScore}>
+                <button onClick={returnToCurrentTask} disabled={Boolean(loading)}>
+                  Back to task
+                </button>
+                <button className="primary" onClick={continueAfterScore} disabled={Boolean(loading)}>
                   {taskIndex + 1 < (hiringNeed?.tasks.length ?? 0) ? "Next task" : "Next"}
                 </button>
-                <button onClick={skipToPassport}>View passport now</button>
+                <button onClick={skipToPassport} disabled={Boolean(loading)}>
+                  View passport now
+                </button>
               </div>
             </section>
           ) : null}
@@ -760,7 +774,9 @@ function App() {
                   <span className="small-label">Shareable portfolio</span>
                   <h2>Your skill passport</h2>
                 </div>
-                <button onClick={copyShareLink}>{copied ? "Copied" : "Copy link"}</button>
+                <button onClick={copyShareLink} disabled={Boolean(loading)}>
+                  {copied ? "Copied" : "Copy link"}
+                </button>
               </div>
               <PassportCard passport={passport} />
               {candidateSubmissions.length > 0 ? (
@@ -768,7 +784,9 @@ function App() {
               ) : null}
               <input className="share-input" readOnly value={passportUrl} />
               <div className="button-row">
-                <button onClick={returnToCurrentTask}>Back to tasks</button>
+                <button onClick={returnToCurrentTask} disabled={Boolean(loading)}>
+                  Back to tasks
+                </button>
               </div>
             </section>
           ) : null}
@@ -823,8 +841,8 @@ function App() {
                   ))}
                 </select>
               </label>
-              <button className="primary" onClick={loginEmployer}>
-                Continue
+              <button className="primary" onClick={loginEmployer} disabled={Boolean(loading)}>
+                {loading ? "Starting..." : "Continue"}
               </button>
             </section>
           ) : null}
@@ -888,8 +906,8 @@ function App() {
                   }
                 />
               </label>
-              <button className="primary" onClick={submitHiringNeed}>
-                Generate shortlist view
+              <button className="primary" onClick={submitHiringNeed} disabled={Boolean(loading)}>
+                {loading ? "Generating..." : "Generate shortlist view"}
               </button>
             </section>
           ) : null}
@@ -903,7 +921,9 @@ function App() {
                     <h2>{currentTrack?.title ?? "Customer Support Associate"}</h2>
                     {hiringNeed ? <p className="muted">{hiringNeed.role_problem_summary}</p> : null}
                   </div>
-                  <button onClick={refreshShortlist}>Refresh</button>
+                  <button onClick={refreshShortlist} disabled={Boolean(loading)}>
+                    {loading ? "Refreshing..." : "Refresh"}
+                  </button>
                 </div>
                 {hiringNeed ? (
                   <div className="skill-strip">
@@ -919,6 +939,7 @@ function App() {
                       className="candidate-row"
                       key={candidateItem.submission_id}
                       onClick={() => openPassport(candidateItem.passport_id)}
+                      disabled={Boolean(loading)}
                     >
                       <span>
                         <strong>{candidateItem.candidate_name}</strong>
@@ -1007,6 +1028,10 @@ function PassportCard({ passport }: { passport: SkillPassport }) {
         <div>
           <small>Action</small>
           <strong>{summary.recommended_action ?? "Review"}</strong>
+        </div>
+        <div>
+          <small>Scoring engine</small>
+          <strong>{summary.evaluation_provider === "groq" ? "Groq AI" : "Fallback"}</strong>
         </div>
       </div>
       {Object.keys(scoreBreakdown).length > 0 ? (

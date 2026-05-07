@@ -158,6 +158,7 @@ export type SkillPassport = {
     evidence_preview?: string;
     headline?: string;
     summary?: string;
+    evaluation_provider?: string;
   };
   strengths: string[];
   gaps: string[];

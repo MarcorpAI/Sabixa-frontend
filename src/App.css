@@ -41,6 +41,11 @@ button:hover {
   border-color: #161a1d;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
 .primary {
   background: #161a1d;
   border-color: #161a1d;
@@ -178,6 +183,9 @@ p {
 }
 
 .notice {
+  position: sticky;
+  top: 10px;
+  z-index: 40;
   max-width: 1040px;
   margin: 0 auto 12px;
   padding: 11px 14px;
@@ -185,6 +193,41 @@ p {
   border-radius: 8px;
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.loading-overlay {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  z-index: 80;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100vw - 28px), 420px);
+  transform: translateX(-50%);
+  padding: 12px 14px;
+  border: 1px solid #d9ded2;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 16px 45px rgba(46, 53, 45, 0.16);
+  color: #161a1d;
+  font-weight: 750;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid #d9ded2;
+  border-top-color: #161a1d;
+  border-radius: 999px;
+  animation: spin 800ms linear infinite;
+  flex: 0 0 auto;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .notice-error {
@@ -314,7 +357,7 @@ p {
 
 .passport-score {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
