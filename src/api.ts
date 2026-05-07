@@ -147,7 +147,18 @@ export type SkillPassport = {
   id: number;
   candidate_id: number;
   submission_id: number;
-  public_summary: Record<string, string>;
+  public_summary: {
+    overall_score?: number;
+    confidence_band?: string;
+    recommended_action?: string;
+    score_breakdown?: Record<string, number>;
+    human_review_required?: boolean;
+    evidence_quotes?: string[];
+    ethics_note?: string;
+    evidence_preview?: string;
+    headline?: string;
+    summary?: string;
+  };
   strengths: string[];
   gaps: string[];
   evidence_preview: string;

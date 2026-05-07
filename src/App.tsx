@@ -16,6 +16,28 @@ type View = "home" | "candidate" | "employer" | "shared-passport";
 type CandidateStep = "onboarding" | "task" | "score" | "passport";
 type EmployerStep = "login" | "intake" | "shortlist";
 
+type CandidateSession = {
+  candidate: Candidate;
+  candidateForm: typeof candidateDefaults;
+  hiringNeed: HiringNeed;
+  shortlist: ShortlistCandidate[];
+  taskIndex: number;
+  answerDrafts: Record<number, string>;
+  submissions: SubmissionResult[];
+  passport: SkillPassport | null;
+  candidateStep: CandidateStep;
+};
+
+type EmployerSession = {
+  employer: EmployerProfile;
+  employerForm: typeof employerDefaults;
+  intakeForm: IntakeAnswers;
+  hiringNeed: HiringNeed | null;
+  shortlist: ShortlistCandidate[];
+  selectedTrackId: string;
+  employerStep: EmployerStep;
+};
+
 const candidateDefaults = {
   full_name: "Zainab Afolayan",
   email: "zainab@sabixa.africa",
@@ -41,6 +63,9 @@ const intakeDefaults: IntakeAnswers = {
   priority_skills: ["Empathy", "Clarity", "Ownership", "Escalation judgement"],
 };
 
+const candidateSessionKey = "sabixa:candidate-session";
+const employerSessionKey = "sabixa:employer-session";
+
 function App() {
   const [view, setView] = useState<View>("home");
   const [candidateStep, setCandidateStep] = useState<CandidateStep>("onboarding");
@@ -59,6 +84,8 @@ function App() {
   const [shortlist, setShortlist] = useState<ShortlistCandidate[]>([]);
   const [taskIndex, setTaskIndex] = useState(0);
   const [answer, setAnswer] = useState("");
+  const [answerDrafts, setAnswerDrafts] = useState<Record<number, string>>({});
+  const [candidateSubmissions, setCandidateSubmissions] = useState<SubmissionResult[]>([]);
   const [submission, setSubmission] = useState<SubmissionResult | null>(null);
   const [passport, setPassport] = useState<SkillPassport | null>(null);
   const [selectedPassport, setSelectedPassport] = useState<SkillPassport | null>(null);
@@ -72,6 +99,7 @@ function App() {
   useEffect(() => {
     void loadTracks();
     void loadSharedPassportFromUrl();
+    restoreSessions();
   }, []);
 
   async function loadTracks() {
@@ -101,11 +129,7 @@ function App() {
     }
   }
 
-  async function ensureDemoData() {
-    if (hiringNeed) {
-      return hiringNeed;
-    }
-
+  async function createCandidateHiringNeed() {
     const seed = await api.seedDemo();
     const [nextNeed, nextShortlist] = await Promise.all([
       api.hiringNeed(seed.hiring_need_id),
@@ -120,7 +144,7 @@ function App() {
   async function startCandidate() {
     setError("");
     setView("candidate");
-    setCandidateStep("onboarding");
+    setCandidateStep(candidate ? candidateStep : "onboarding");
   }
 
   async function loginCandidate() {
@@ -132,7 +156,8 @@ function App() {
     setLoading("Setting up your task");
     setError("");
     try {
-      await ensureDemoData();
+      const activeNeed = await createCandidateHiringNeed();
+      const activeShortlist = await api.shortlist(activeNeed.id);
       const auth = await api.candidateAuth({
         ...candidateForm,
         email: uniqueEmail(candidateForm.email),
@@ -142,9 +167,22 @@ function App() {
       setCandidateStep("task");
       setTaskIndex(0);
       setAnswer("");
+      setAnswerDrafts({});
+      setCandidateSubmissions([]);
       setSubmission(null);
       setPassport(null);
       clearShareUrl();
+      saveCandidateSession({
+        candidate: auth.candidate,
+        candidateForm,
+        hiringNeed: activeNeed,
+        shortlist: activeShortlist,
+        taskIndex: 0,
+        answerDrafts: {},
+        submissions: [],
+        passport: null,
+        candidateStep: "task",
+      });
     } catch (candidateError) {
       setError(readError(candidateError, "Could not start candidate task."));
     } finally {
@@ -153,7 +191,15 @@ function App() {
   }
 
   async function submitTask() {
-    if (!candidate || !hiringNeed || !currentTask) {
+    let activeNeed = hiringNeed;
+    let activeTask = currentTask;
+
+    if (!activeNeed || !activeTask) {
+      activeNeed = await createCandidateHiringNeed();
+      activeTask = activeNeed.tasks[taskIndex] ?? activeNeed.tasks[0] ?? null;
+    }
+
+    if (!candidate || !activeNeed || !activeTask) {
       setError("Start candidate onboarding first.");
       return;
     }
@@ -167,19 +213,38 @@ function App() {
     try {
       const result = await api.submitTask({
         candidate_id: candidate.id,
-        hiring_need_id: hiringNeed.id,
-        task_id: currentTask.id,
+        hiring_need_id: activeNeed.id,
+        task_id: activeTask.id,
         answer: answer.trim(),
       });
       const [nextShortlist, nextPassport] = await Promise.all([
-        api.shortlist(hiringNeed.id),
+        api.shortlist(activeNeed.id),
         api.getPassport(result.passport.id),
       ]);
+      const nextSubmissions = upsertSubmission(candidateSubmissions, result);
       setSubmission(result);
       setPassport(nextPassport);
       setShortlist(nextShortlist);
+      setCandidateSubmissions(nextSubmissions);
       setCandidateStep("score");
+      saveCandidateSession({
+        candidate,
+        candidateForm,
+        hiringNeed: activeNeed,
+        shortlist: nextShortlist,
+        taskIndex,
+        answerDrafts: { ...answerDrafts, [activeTask.id]: answer },
+        submissions: nextSubmissions,
+        passport: nextPassport,
+        candidateStep: "score",
+      });
     } catch (submissionError) {
+      if (readError(submissionError, "").toLowerCase().includes("hiring need not found")) {
+        setHiringNeed(null);
+        setSelectedPassport(null);
+        setError("The demo hiring need expired. Continue again to reload the task.");
+        return;
+      }
       setError(readError(submissionError, "Could not score this task."));
     } finally {
       setLoading("");
@@ -193,10 +258,26 @@ function App() {
 
     const hasNextTask = taskIndex + 1 < hiringNeed.tasks.length;
     if (hasNextTask) {
-      setTaskIndex((index) => index + 1);
-      setAnswer("");
+      const nextIndex = taskIndex + 1;
+      const nextTask = hiringNeed.tasks[nextIndex];
+      const nextAnswer = nextTask ? answerDrafts[nextTask.id] ?? "" : "";
+      setTaskIndex(nextIndex);
+      setAnswer(nextAnswer);
       setSubmission(null);
       setCandidateStep("task");
+      if (candidate) {
+        saveCandidateSession({
+          candidate,
+          candidateForm,
+          hiringNeed,
+          shortlist,
+          taskIndex: nextIndex,
+          answerDrafts,
+          submissions: candidateSubmissions,
+          passport,
+          candidateStep: "task",
+        });
+      }
       return;
     }
 
@@ -204,12 +285,55 @@ function App() {
       updateShareUrl(passport.id);
     }
     setCandidateStep("passport");
+    persistCandidateStep("passport");
   }
 
   function skipToPassport() {
     if (passport) {
       updateShareUrl(passport.id);
       setCandidateStep("passport");
+      persistCandidateStep("passport");
+    }
+  }
+
+  function goToPreviousTask() {
+    if (!hiringNeed || taskIndex === 0) {
+      return;
+    }
+
+    const nextIndex = taskIndex - 1;
+    const nextTask = hiringNeed.tasks[nextIndex];
+    const nextAnswer = nextTask ? answerDrafts[nextTask.id] ?? "" : "";
+    setTaskIndex(nextIndex);
+    setAnswer(nextAnswer);
+    setSubmission(candidateSubmissions.find((item) => item.submission.task_id === nextTask?.id) ?? null);
+    setCandidateStep("task");
+    persistCandidateWork(nextIndex, nextAnswer, "task");
+  }
+
+  function returnToCurrentTask() {
+    setCandidateStep("task");
+    persistCandidateStep("task");
+  }
+
+  function updateAnswer(nextAnswer: string) {
+    setAnswer(nextAnswer);
+    if (currentTask) {
+      const nextDrafts = { ...answerDrafts, [currentTask.id]: nextAnswer };
+      setAnswerDrafts(nextDrafts);
+      if (candidate && hiringNeed) {
+        saveCandidateSession({
+          candidate,
+          candidateForm,
+          hiringNeed,
+          shortlist,
+          taskIndex,
+          answerDrafts: nextDrafts,
+          submissions: candidateSubmissions,
+          passport,
+          candidateStep,
+        });
+      }
     }
   }
 
@@ -237,6 +361,15 @@ function App() {
       });
       setEmployer(nextEmployer);
       setEmployerStep("intake");
+      saveEmployerSession({
+        employer: nextEmployer,
+        employerForm,
+        intakeForm,
+        hiringNeed,
+        shortlist,
+        selectedTrackId,
+        employerStep: "intake",
+      });
     } catch (employerError) {
       setError(readError(employerError, "Could not start employer session."));
     } finally {
@@ -263,6 +396,15 @@ function App() {
       setShortlist(nextShortlist);
       setSelectedPassport(null);
       setEmployerStep("shortlist");
+      saveEmployerSession({
+        employer,
+        employerForm,
+        intakeForm,
+        hiringNeed: nextNeed,
+        shortlist: nextShortlist,
+        selectedTrackId,
+        employerStep: "shortlist",
+      });
     } catch (intakeError) {
       setError(readError(intakeError, "Could not create hiring need."));
     } finally {
@@ -281,6 +423,17 @@ function App() {
     try {
       const nextShortlist = await api.shortlist(hiringNeed.id);
       setShortlist(nextShortlist);
+      if (employer) {
+        saveEmployerSession({
+          employer,
+          employerForm,
+          intakeForm,
+          hiringNeed,
+          shortlist: nextShortlist,
+          selectedTrackId,
+          employerStep,
+        });
+      }
     } catch (refreshError) {
       setError(readError(refreshError, "Could not refresh candidates."));
     } finally {
@@ -314,6 +467,94 @@ function App() {
     }
   }
 
+  function logoutCandidate() {
+    localStorage.removeItem(candidateSessionKey);
+    setCandidate(null);
+    setCandidateStep("onboarding");
+    setTaskIndex(0);
+    setAnswer("");
+    setAnswerDrafts({});
+    setSubmission(null);
+    setCandidateSubmissions([]);
+    setPassport(null);
+    clearShareUrl();
+  }
+
+  function logoutEmployer() {
+    localStorage.removeItem(employerSessionKey);
+    setEmployer(null);
+    setEmployerStep("login");
+    setSelectedPassport(null);
+  }
+
+  function persistCandidateStep(nextStep: CandidateStep) {
+    if (!candidate || !hiringNeed) {
+      return;
+    }
+    saveCandidateSession({
+      candidate,
+      candidateForm,
+      hiringNeed,
+      shortlist,
+      taskIndex,
+      answerDrafts,
+      submissions: candidateSubmissions,
+      passport,
+      candidateStep: nextStep,
+    });
+  }
+
+  function persistCandidateWork(nextTaskIndex: number, nextAnswer: string, nextStep: CandidateStep) {
+    if (!candidate || !hiringNeed) {
+      return;
+    }
+    const task = hiringNeed.tasks[nextTaskIndex];
+    const nextDrafts = task ? { ...answerDrafts, [task.id]: nextAnswer } : answerDrafts;
+    setAnswerDrafts(nextDrafts);
+    saveCandidateSession({
+      candidate,
+      candidateForm,
+      hiringNeed,
+      shortlist,
+      taskIndex: nextTaskIndex,
+      answerDrafts: nextDrafts,
+      submissions: candidateSubmissions,
+      passport,
+      candidateStep: nextStep,
+    });
+  }
+
+  function restoreSessions() {
+    const candidateSession = readSession<CandidateSession>(candidateSessionKey);
+    if (candidateSession) {
+      setCandidate(candidateSession.candidate);
+      setCandidateForm(candidateSession.candidateForm);
+      setHiringNeed(candidateSession.hiringNeed);
+      setShortlist(candidateSession.shortlist);
+      setTaskIndex(candidateSession.taskIndex);
+      setAnswerDrafts(candidateSession.answerDrafts);
+      setCandidateSubmissions(candidateSession.submissions);
+      setPassport(candidateSession.passport);
+      setCandidateStep(candidateSession.candidateStep);
+      const task = candidateSession.hiringNeed.tasks[candidateSession.taskIndex];
+      setAnswer(task ? candidateSession.answerDrafts[task.id] ?? "" : "");
+      setSubmission(
+        candidateSession.submissions.find((item) => item.submission.task_id === task?.id) ?? null
+      );
+    }
+
+    const employerSession = readSession<EmployerSession>(employerSessionKey);
+    if (employerSession) {
+      setEmployer(employerSession.employer);
+      setEmployerForm(employerSession.employerForm);
+      setIntakeForm(employerSession.intakeForm);
+      setSelectedTrackId(employerSession.selectedTrackId);
+      setHiringNeed((current) => current ?? employerSession.hiringNeed);
+      setShortlist((current) => (current.length > 0 ? current : employerSession.shortlist));
+      setEmployerStep(employerSession.employerStep);
+    }
+  }
+
   return (
     <div className="app-shell">
       {view !== "home" ? (
@@ -324,6 +565,8 @@ function App() {
           <div className="topbar-actions">
             <button onClick={startCandidate}>Candidate</button>
             <button onClick={startEmployer}>Employer</button>
+            {view === "candidate" && candidate ? <button onClick={logoutCandidate}>Logout</button> : null}
+            {view === "employer" && employer ? <button onClick={logoutEmployer}>Logout</button> : null}
           </div>
         </header>
       ) : null}
@@ -397,7 +640,7 @@ function App() {
                 />
               </label>
               <button className="primary" onClick={loginCandidate}>
-                Continue to task
+                {candidate ? "Continue session" : "Continue to task"}
               </button>
             </section>
           ) : null}
@@ -430,13 +673,16 @@ function App() {
                 <textarea
                   rows={9}
                   value={answer}
-                  onChange={(event) => setAnswer(event.target.value)}
+                  onChange={(event) => updateAnswer(event.target.value)}
                   placeholder="Write your customer response here..."
                 />
               </label>
-              <button className="primary" onClick={submitTask}>
-                Submit for AI review
-              </button>
+              <div className="button-row">
+                {taskIndex > 0 ? <button onClick={goToPreviousTask}>Previous task</button> : null}
+                <button className="primary" onClick={submitTask}>
+                  Submit for AI review
+                </button>
+              </div>
             </section>
           ) : null}
 
@@ -460,6 +706,7 @@ function App() {
                 <p>{submission.evaluation.parsed_json.confidence_reason}</p>
               </div>
               <div className="button-row">
+                <button onClick={returnToCurrentTask}>Back to task</button>
                 <button className="primary" onClick={continueAfterScore}>
                   {taskIndex + 1 < (hiringNeed?.tasks.length ?? 0) ? "Next task" : "Next"}
                 </button>
@@ -478,7 +725,13 @@ function App() {
                 <button onClick={copyShareLink}>{copied ? "Copied" : "Copy link"}</button>
               </div>
               <PassportCard passport={passport} />
+              {candidateSubmissions.length > 0 ? (
+                <TaskHistory submissions={candidateSubmissions} />
+              ) : null}
               <input className="share-input" readOnly value={passportUrl} />
+              <div className="button-row">
+                <button onClick={returnToCurrentTask}>Back to tasks</button>
+              </div>
             </section>
           ) : null}
         </main>
@@ -676,8 +929,24 @@ function App() {
   );
 }
 
+function TaskHistory({ submissions }: { submissions: SubmissionResult[] }) {
+  return (
+    <div className="task-history">
+      <h3>Completed tasks</h3>
+      {submissions.map((item) => (
+        <div key={item.submission.id}>
+          <span>Task #{item.submission.task_id}</span>
+          <strong>{item.evaluation.parsed_json.overall_score}/100</strong>
+          <small>{item.evaluation.parsed_json.recommended_action}</small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function PassportCard({ passport }: { passport: SkillPassport }) {
   const summary = passport.public_summary ?? {};
+  const scoreBreakdown = summary.score_breakdown ?? {};
 
   return (
     <div className="passport">
@@ -688,14 +957,42 @@ function PassportCard({ passport }: { passport: SkillPassport }) {
         </div>
         <span>#{passport.id}</span>
       </div>
+      <div className="passport-score">
+        <div>
+          <small>Overall score</small>
+          <strong>{summary.overall_score ?? "N/A"}</strong>
+        </div>
+        <div>
+          <small>Confidence</small>
+          <strong>{summary.confidence_band ?? "N/A"}</strong>
+        </div>
+        <div>
+          <small>Action</small>
+          <strong>{summary.recommended_action ?? "Review"}</strong>
+        </div>
+      </div>
+      {Object.keys(scoreBreakdown).length > 0 ? (
+        <div className="breakdown-grid">
+          {Object.entries(scoreBreakdown).map(([label, score]) => (
+            <div key={label}>
+              <span>{formatLabel(label)}</span>
+              <strong>{score}</strong>
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div className="passport-columns">
         <ReviewList title="Strengths" items={passport.strengths} />
         <ReviewList title="Gaps" items={passport.gaps} />
       </div>
+      {summary.evidence_quotes && summary.evidence_quotes.length > 0 ? (
+        <ReviewList title="Evidence notes" items={summary.evidence_quotes} />
+      ) : null}
       <div className="portfolio-evidence">
         <strong>Portfolio evidence</strong>
         <p>{passport.evidence_preview}</p>
       </div>
+      {summary.ethics_note ? <p className="ethics-note">{summary.ethics_note}</p> : null}
     </div>
   );
 }
@@ -736,6 +1033,33 @@ function updateShareUrl(passportId: number) {
 
 function clearShareUrl() {
   window.history.replaceState({}, "", window.location.pathname);
+}
+
+function formatLabel(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function upsertSubmission(items: SubmissionResult[], nextItem: SubmissionResult) {
+  const withoutTask = items.filter((item) => item.submission.task_id !== nextItem.submission.task_id);
+  return [...withoutTask, nextItem].sort((a, b) => a.submission.task_id - b.submission.task_id);
+}
+
+function saveCandidateSession(session: CandidateSession) {
+  localStorage.setItem(candidateSessionKey, JSON.stringify(session));
+}
+
+function saveEmployerSession(session: EmployerSession) {
+  localStorage.setItem(employerSessionKey, JSON.stringify(session));
+}
+
+function readSession<T>(key: string) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    localStorage.removeItem(key);
+    return null;
+  }
 }
 
 function readError(error: unknown, fallback: string) {
