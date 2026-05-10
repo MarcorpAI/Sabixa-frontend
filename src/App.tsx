@@ -1,65 +1,25 @@
 import { useEffect, useState } from "react";
 import {
   api,
-  type Candidate,
-  type EmployerProfile,
+  setAuthToken,
+  type AuthSession,
+  type CandidateDashboard,
+  type EmployerDashboard,
   type HiringNeed,
   type IntakeAnswers,
-  type RoleTrack,
   type ShortlistCandidate,
   type SkillPassport,
   type SubmissionResult,
+  type Task,
+  type TrialTaskReview,
 } from "./api";
 import "./App.css";
 
-type View = "home" | "candidate" | "employer" | "shared-passport";
-type CandidateStep = "onboarding" | "task" | "score" | "passport";
-type EmployerStep = "login" | "intake" | "shortlist";
+type View = "landing" | "auth" | "candidate" | "employer" | "passport";
+type Role = "candidate" | "employer";
+type AuthMode = "login" | "signup";
 
-type CandidateSession = {
-  candidate: Candidate;
-  candidateForm: typeof candidateDefaults;
-  hiringNeed: HiringNeed;
-  shortlist: ShortlistCandidate[];
-  taskIndex: number;
-  answerDrafts: Record<number, string>;
-  submissions: SubmissionResult[];
-  passport: SkillPassport | null;
-  candidateStep: CandidateStep;
-};
-
-type EmployerSession = {
-  employer: EmployerProfile;
-  employerForm: typeof employerDefaults;
-  intakeForm: IntakeAnswers;
-  hiringNeed: HiringNeed | null;
-  shortlist: ShortlistCandidate[];
-  selectedTrackId: string;
-  employerStep: EmployerStep;
-};
-
-const candidateDefaults = {
-  full_name: "Zainab Afolayan",
-  email: "zainab@sabixa.africa",
-  location: "Lagos, Nigeria",
-  experience: "Entry-level customer support and complaint handling experience.",
-};
-
-const employerDefaults = {
-  full_name: "Ada Nwosu",
-  email: "ada@sabixa.africa",
-  company_name: "Kori Market",
-};
-
-const fallbackTrack: RoleTrack = {
-  id: "customer-support-associate",
-  title: "Customer Support Associate",
-  role_family: "Customer support / customer operations",
-  summary: "Customer support task track.",
-  task_count: 3,
-  benchmark: "2 tasks with 70+ average",
-  competencies: ["Empathy", "Clarity", "Ownership", "Escalation judgement"],
-};
+const initialPassportId = new URLSearchParams(window.location.search).get("passport");
 
 const intakeDefaults: IntakeAnswers = {
   why_hiring_now: "Support messages are increasing and delayed responses are causing refunds.",
@@ -73,75 +33,128 @@ const intakeDefaults: IntakeAnswers = {
   priority_skills: ["Empathy", "Clarity", "Ownership", "Escalation judgement"],
 };
 
-const candidateSessionKey = "sabixa:candidate-session";
-const employerSessionKey = "sabixa:employer-session";
+const emptyAuth = {
+  full_name: "",
+  email: "",
+  password: "",
+  company_name: "",
+  location: "Lagos, Nigeria",
+  experience: "",
+};
 
 function App() {
-  const [view, setView] = useState<View>("home");
-  const [candidateStep, setCandidateStep] = useState<CandidateStep>("onboarding");
-  const [employerStep, setEmployerStep] = useState<EmployerStep>("login");
+  const [view, setView] = useState<View>(initialPassportId ? "passport" : "landing");
+  const [authMode, setAuthMode] = useState<AuthMode>("signup");
+  const [authRole, setAuthRole] = useState<Role>("candidate");
+  const [authForm, setAuthForm] = useState(emptyAuth);
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [candidateDashboard, setCandidateDashboard] = useState<CandidateDashboard | null>(null);
+  const [employerDashboard, setEmployerDashboard] = useState<EmployerDashboard | null>(null);
+  const [hiringNeed, setHiringNeed] = useState<HiringNeed | null>(null);
+  const [taskIndex, setTaskIndex] = useState(0);
+  const [answer, setAnswer] = useState("");
+  const [latestSubmission, setLatestSubmission] = useState<SubmissionResult | null>(null);
+  const [passport, setPassport] = useState<SkillPassport | null>(null);
+  const [selectedPassport, setSelectedPassport] = useState<SkillPassport | null>(null);
+  const [intakeForm, setIntakeForm] = useState<IntakeAnswers>(intakeDefaults);
+  const [shortlist, setShortlist] = useState<ShortlistCandidate[]>([]);
+  const [trialTaskText, setTrialTaskText] = useState("");
+  const [trialReview, setTrialReview] = useState<TrialTaskReview | null>(null);
   const [loading, setLoading] = useState("");
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
-  const [tracks, setTracks] = useState<RoleTrack[]>([]);
-  const [selectedTrackId, setSelectedTrackId] = useState("customer-support-associate");
-  const [candidateForm, setCandidateForm] = useState(candidateDefaults);
-  const [employerForm, setEmployerForm] = useState(employerDefaults);
-  const [intakeForm, setIntakeForm] = useState<IntakeAnswers>(intakeDefaults);
-  const [candidate, setCandidate] = useState<Candidate | null>(null);
-  const [employer, setEmployer] = useState<EmployerProfile | null>(null);
-  const [hiringNeed, setHiringNeed] = useState<HiringNeed | null>(null);
-  const [shortlist, setShortlist] = useState<ShortlistCandidate[]>([]);
-  const [taskIndex, setTaskIndex] = useState(0);
-  const [answer, setAnswer] = useState("");
-  const [answerDrafts, setAnswerDrafts] = useState<Record<number, string>>({});
-  const [candidateSubmissions, setCandidateSubmissions] = useState<SubmissionResult[]>([]);
-  const [submission, setSubmission] = useState<SubmissionResult | null>(null);
-  const [passport, setPassport] = useState<SkillPassport | null>(null);
-  const [selectedPassport, setSelectedPassport] = useState<SkillPassport | null>(null);
 
-  const roleTrackOptions = tracks.length > 0 ? tracks : [fallbackTrack];
-  const currentTrack =
-    roleTrackOptions.find((track) => track.id === selectedTrackId) ?? roleTrackOptions[0];
   const currentTask = hiringNeed?.tasks[taskIndex] ?? null;
-  const passportUrl = passport
+  const shareUrl = passport
     ? `${window.location.origin}${window.location.pathname}?passport=${passport.id}`
     : "";
 
   useEffect(() => {
-    void loadTracks();
-    void loadSharedPassportFromUrl();
-    restoreSessions();
+    if (initialPassportId) {
+      void openPassport(Number(initialPassportId), true);
+      return;
+    }
+    void restoreSession();
+    // Initial boot only: URL state and saved auth token are read once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function loadTracks() {
+  async function restoreSession() {
     try {
-      const nextTracks = await api.roleTracks();
-      setTracks(nextTracks);
-      setSelectedTrackId(nextTracks[0]?.id ?? "customer-support-associate");
-    } catch (loadError) {
-      setError(readError(loadError, "Could not load role categories."));
+      const restored = await api.me();
+      setSession(restored);
+      if (restored.user.role === "candidate") {
+        setView("candidate");
+        await loadCandidateDashboard();
+      }
+      if (restored.user.role === "employer") {
+        setSelectedPassport(null);
+        setView("employer");
+        await loadEmployerDashboard();
+      }
+    } catch {
+      setAuthToken("");
     }
   }
 
-  async function loadSharedPassportFromUrl() {
-    const passportId = new URLSearchParams(window.location.search).get("passport");
-    if (!passportId) {
-      return;
-    }
-    setView("shared-passport");
-    setLoading("Loading passport");
+  async function submitAuth() {
+    setError("");
+    setLoading(authMode === "login" ? "Signing in" : "Creating account");
     try {
-      const sharedPassport = await api.getPassport(Number(passportId));
-      setSelectedPassport(sharedPassport);
-    } catch (passportError) {
-      setError(readError(passportError, "Could not load shared passport."));
+      const nextSession =
+        authMode === "login"
+          ? await api.login({ email: authForm.email, password: authForm.password })
+          : await api.signup({
+              role: authRole,
+              full_name: authForm.full_name,
+              email: authForm.email,
+              password: authForm.password,
+              company_name: authForm.company_name,
+              location: authForm.location,
+              experience: authForm.experience || "Entry-level customer support candidate.",
+            });
+      setAuthToken(nextSession.access_token);
+      setSession(nextSession);
+      setAuthForm(emptyAuth);
+      if (nextSession.user.role === "candidate") {
+        setView("candidate");
+        await loadCandidateDashboard();
+      } else {
+        setSelectedPassport(null);
+        setView("employer");
+        await loadEmployerDashboard();
+      }
+    } catch (authError) {
+      setError(readError(authError, "Could not complete auth."));
     } finally {
       setLoading("");
     }
   }
 
-  async function createCandidateHiringNeed() {
+  async function loadCandidateDashboard() {
+    try {
+      const dashboard = await api.candidateDashboard();
+      setCandidateDashboard(dashboard);
+      setPassport(dashboard.latest_passport);
+    } catch {
+      setCandidateDashboard(null);
+    }
+  }
+
+  async function loadEmployerDashboard() {
+    try {
+      const dashboard = await api.employerDashboard();
+      setEmployerDashboard(dashboard);
+      setHiringNeed(dashboard.active_hiring_need);
+      setSelectedPassport(null);
+      const globalRows = await api.globalShortlist();
+      setShortlist(globalRows);
+    } catch {
+      setEmployerDashboard(null);
+    }
+  }
+
+  async function createAssessmentNeed() {
     const poolEmployer = await api.employerAuth({
       user: {
         full_name: "Sabixa Assessment Pool",
@@ -154,324 +167,96 @@ function App() {
       support_channel: intakeDefaults.channels,
       customer_volume: intakeDefaults.weekly_ticket_volume,
     });
-    const nextNeed = await api.createHiringNeed({
+    const need = await api.createHiringNeed({
       employer_id: poolEmployer.id,
-      rough_jd: `${currentTrack?.title ?? "Customer support"} assessment pool`,
+      rough_jd: "Customer support assessment pool",
       intake_answers: intakeDefaults,
     });
-    const nextShortlist = await api.globalShortlist();
-    setHiringNeed(nextNeed);
-    setShortlist(nextShortlist);
+    setHiringNeed(need);
     setTaskIndex(0);
-    return nextNeed;
+    setAnswer("");
+    return need;
   }
 
-  async function startCandidate() {
-    setError("");
-    setView("candidate");
-    setCandidateStep(candidate ? candidateStep : "onboarding");
-  }
-
-  async function loginCandidate() {
-    if (!currentTrack) {
-      setError("Role category is still loading.");
-      return;
-    }
-
-    setLoading("Setting up your task");
+  async function startAssessment() {
+    setLoading("Preparing assessment");
     setError("");
     try {
-      const activeNeed = await createCandidateHiringNeed();
-      const activeShortlist = await api.globalShortlist();
-      const auth = await api.candidateAuth({
-        ...candidateForm,
-        email: uniqueEmail(candidateForm.email),
-        role_track_id: currentTrack.id,
-      });
-      setCandidate(auth.candidate);
-      setCandidateStep("task");
-      setTaskIndex(0);
-      setAnswer("");
-      setAnswerDrafts({});
-      setCandidateSubmissions([]);
-      setSubmission(null);
-      setPassport(null);
-      clearShareUrl();
-      saveCandidateSession({
-        candidate: auth.candidate,
-        candidateForm,
-        hiringNeed: activeNeed,
-        shortlist: activeShortlist,
-        taskIndex: 0,
-        answerDrafts: {},
-        submissions: [],
-        passport: null,
-        candidateStep: "task",
-      });
-    } catch (candidateError) {
-      setError(readError(candidateError, "Could not start candidate task."));
+      await createAssessmentNeed();
+    } catch (assessmentError) {
+      setError(readError(assessmentError, "Could not prepare assessment."));
     } finally {
       setLoading("");
     }
   }
 
   async function submitTask() {
-    let activeNeed = hiringNeed;
-    let activeTask = currentTask;
-
-    if (!activeNeed || !activeTask) {
-      activeNeed = await createCandidateHiringNeed();
-      activeTask = activeNeed.tasks[taskIndex] ?? activeNeed.tasks[0] ?? null;
-    }
-
-    if (!candidate || !activeNeed || !activeTask) {
-      setError("Start candidate onboarding first.");
+    if (!session?.candidate) {
+      setError("Login as a candidate first.");
       return;
     }
-    if (!answer.trim()) {
+    const need = hiringNeed ?? (await createAssessmentNeed());
+    const task = need.tasks[taskIndex] ?? need.tasks[0];
+    if (!task || !answer.trim()) {
       setError("Write your response before submitting.");
       return;
     }
-
-    setLoading("AI is scoring your task");
+    setLoading("Scoring response");
     setError("");
     try {
       const result = await api.submitTask({
-        candidate_id: candidate.id,
-        hiring_need_id: activeNeed.id,
-        task_id: activeTask.id,
+        candidate_id: session.candidate.id,
+        hiring_need_id: need.id,
+        task_id: task.id,
         answer: answer.trim(),
       });
-      const [nextShortlist, nextPassport] = await Promise.all([
-        api.globalShortlist(),
-        api.getPassport(result.passport.id),
-      ]);
-      const nextSubmissions = upsertSubmission(candidateSubmissions, result);
-      setSubmission(result);
+      const nextPassport = await api.getPassport(result.passport.id);
+      setLatestSubmission(result);
       setPassport(nextPassport);
-      setShortlist(nextShortlist);
-      setCandidateSubmissions(nextSubmissions);
-      setCandidateStep("score");
-      saveCandidateSession({
-        candidate,
-        candidateForm,
-        hiringNeed: activeNeed,
-        shortlist: nextShortlist,
-        taskIndex,
-        answerDrafts: { ...answerDrafts, [activeTask.id]: answer },
-        submissions: nextSubmissions,
-        passport: nextPassport,
-        candidateStep: "score",
-      });
+      await loadCandidateDashboard();
     } catch (submissionError) {
-      if (readError(submissionError, "").toLowerCase().includes("hiring need not found")) {
-        setHiringNeed(null);
-        setSelectedPassport(null);
-        setError("The demo hiring need expired. Continue again to reload the task.");
-        return;
-      }
       setError(readError(submissionError, "Could not score this task."));
     } finally {
       setLoading("");
     }
   }
 
-  function continueAfterScore() {
-    if (!hiringNeed) {
+  async function createHiringNeed() {
+    if (!session?.employer) {
+      setError("Login as an employer first.");
       return;
     }
-
-    const hasNextTask = taskIndex + 1 < hiringNeed.tasks.length;
-    if (hasNextTask) {
-      const nextIndex = taskIndex + 1;
-      const nextTask = hiringNeed.tasks[nextIndex];
-      const nextAnswer = nextTask ? answerDrafts[nextTask.id] ?? "" : "";
-      setTaskIndex(nextIndex);
-      setAnswer(nextAnswer);
-      setSubmission(null);
-      setCandidateStep("task");
-      if (candidate) {
-        saveCandidateSession({
-          candidate,
-          candidateForm,
-          hiringNeed,
-          shortlist,
-          taskIndex: nextIndex,
-          answerDrafts,
-          submissions: candidateSubmissions,
-          passport,
-          candidateStep: "task",
-        });
-      }
-      return;
-    }
-
-    if (passport) {
-      updateShareUrl(passport.id);
-    }
-    setCandidateStep("passport");
-    persistCandidateStep("passport");
-  }
-
-  function skipToPassport() {
-    if (passport) {
-      updateShareUrl(passport.id);
-      setCandidateStep("passport");
-      persistCandidateStep("passport");
-    }
-  }
-
-  function goToPreviousTask() {
-    if (!hiringNeed || taskIndex === 0) {
-      return;
-    }
-
-    const nextIndex = taskIndex - 1;
-    const nextTask = hiringNeed.tasks[nextIndex];
-    const nextAnswer = nextTask ? answerDrafts[nextTask.id] ?? "" : "";
-    setTaskIndex(nextIndex);
-    setAnswer(nextAnswer);
-    setSubmission(candidateSubmissions.find((item) => item.submission.task_id === nextTask?.id) ?? null);
-    setCandidateStep("task");
-    persistCandidateWork(nextIndex, nextAnswer, "task");
-  }
-
-  function returnToCurrentTask() {
-    setCandidateStep("task");
-    persistCandidateStep("task");
-  }
-
-  function updateAnswer(nextAnswer: string) {
-    setAnswer(nextAnswer);
-    if (currentTask) {
-      const nextDrafts = { ...answerDrafts, [currentTask.id]: nextAnswer };
-      setAnswerDrafts(nextDrafts);
-      if (candidate && hiringNeed) {
-        saveCandidateSession({
-          candidate,
-          candidateForm,
-          hiringNeed,
-          shortlist,
-          taskIndex,
-          answerDrafts: nextDrafts,
-          submissions: candidateSubmissions,
-          passport,
-          candidateStep,
-        });
-      }
-    }
-  }
-
-  async function startEmployer() {
-    setError("");
-    setView("employer");
-    setEmployerStep("login");
-  }
-
-  async function loginEmployer() {
-    setLoading("Starting employer session");
-    setError("");
-    try {
-      const nextEmployer = await api.employerAuth({
-        user: {
-          full_name: employerForm.full_name,
-          email: employerForm.email,
-          role: "employer",
-        },
-        company_name: employerForm.company_name,
-        company_type: "SME or startup",
-        sector: "Customer support",
-        support_channel: ["WhatsApp", "Email"],
-        customer_volume: "Hiring pipeline",
-      });
-      setEmployer(nextEmployer);
-      setEmployerStep("intake");
-      saveEmployerSession({
-        employer: nextEmployer,
-        employerForm,
-        intakeForm,
-        hiringNeed,
-        shortlist,
-        selectedTrackId,
-        employerStep: "intake",
-      });
-    } catch (employerError) {
-      setError(readError(employerError, "Could not start employer session."));
-    } finally {
-      setLoading("");
-    }
-  }
-
-  async function submitHiringNeed() {
-    if (!employer) {
-      setError("Login as employer first.");
-      return;
-    }
-
     setLoading("Generating task pack");
     setError("");
     try {
-      const nextNeed = await api.createHiringNeed({
-        employer_id: employer.id,
-        rough_jd: `${currentTrack?.title ?? "Customer support"} role for ${employerForm.company_name}`,
+      const need = await api.createHiringNeed({
+        employer_id: session.employer.id,
+        rough_jd: `Customer support role for ${session.employer.company_name}`,
         intake_answers: intakeForm,
       });
-      const nextShortlist = await api.globalShortlist();
-      setHiringNeed(nextNeed);
-      setShortlist(nextShortlist);
-      setSelectedPassport(null);
-      setEmployerStep("shortlist");
-      saveEmployerSession({
-        employer,
-        employerForm,
-        intakeForm,
-        hiringNeed: nextNeed,
-        shortlist: nextShortlist,
-        selectedTrackId,
-        employerStep: "shortlist",
-      });
-    } catch (intakeError) {
-      setError(readError(intakeError, "Could not create hiring need."));
+      setHiringNeed(need);
+      setEmployerDashboard((current) =>
+        current
+          ? { ...current, active_hiring_need: need, hiring_needs: [need, ...current.hiring_needs] }
+          : current
+      );
+      setShortlist(await api.globalShortlist());
+    } catch (needError) {
+      setError(readError(needError, "Could not create hiring need."));
     } finally {
       setLoading("");
     }
   }
 
-  async function refreshShortlist() {
-    if (!hiringNeed) {
-      setError("Choose a role category first.");
-      return;
-    }
-
-    setLoading("Refreshing candidates");
-    setError("");
-    try {
-      const nextShortlist = await api.globalShortlist();
-      setShortlist(nextShortlist);
-      if (employer) {
-        saveEmployerSession({
-          employer,
-          employerForm,
-          intakeForm,
-          hiringNeed,
-          shortlist: nextShortlist,
-          selectedTrackId,
-          employerStep,
-        });
-      }
-    } catch (refreshError) {
-      setError(readError(refreshError, "Could not refresh candidates."));
-    } finally {
-      setLoading("");
-    }
-  }
-
-  async function openPassport(passportId: number) {
+  async function openPassport(passportId: number, publicView = false) {
     setLoading("Opening passport");
     setError("");
     try {
       const nextPassport = await api.getPassport(passportId);
       setSelectedPassport(nextPassport);
+      if (publicView) {
+        setPassport(nextPassport);
+      }
     } catch (passportError) {
       setError(readError(passportError, "Could not open passport."));
     } finally {
@@ -480,642 +265,550 @@ function App() {
   }
 
   async function copyShareLink() {
-    if (!passportUrl) {
-      return;
-    }
+    if (!shareUrl) return;
     try {
-      await navigator.clipboard.writeText(passportUrl);
+      await navigator.clipboard.writeText(shareUrl);
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+      window.setTimeout(() => setCopied(false), 1600);
     } catch {
       setError("Could not copy link.");
     }
   }
 
-  function logoutCandidate() {
-    localStorage.removeItem(candidateSessionKey);
-    setCandidate(null);
-    setCandidateStep("onboarding");
-    setTaskIndex(0);
-    setAnswer("");
-    setAnswerDrafts({});
-    setSubmission(null);
-    setCandidateSubmissions([]);
+  async function reconcileTrialTask() {
+    if (!hiringNeed || !trialTaskText.trim()) {
+      setError("Create a hiring need and paste a trial task first.");
+      return;
+    }
+    setLoading("Checking overlap");
+    setError("");
+    try {
+      const review = await api.trialTaskReconcile({
+        hiring_need_id: hiringNeed.id,
+        trial_task_text: trialTaskText,
+      });
+      setTrialReview(review);
+    } catch (trialError) {
+      setError(readError(trialError, "Could not review trial task."));
+    } finally {
+      setLoading("");
+    }
+  }
+
+  function logout() {
+    setAuthToken("");
+    setSession(null);
+    setCandidateDashboard(null);
+    setEmployerDashboard(null);
+    setHiringNeed(null);
     setPassport(null);
-    clearShareUrl();
-  }
-
-  function logoutEmployer() {
-    localStorage.removeItem(employerSessionKey);
-    setEmployer(null);
-    setEmployerStep("login");
     setSelectedPassport(null);
-  }
-
-  function persistCandidateStep(nextStep: CandidateStep) {
-    if (!candidate || !hiringNeed) {
-      return;
-    }
-    saveCandidateSession({
-      candidate,
-      candidateForm,
-      hiringNeed,
-      shortlist,
-      taskIndex,
-      answerDrafts,
-      submissions: candidateSubmissions,
-      passport,
-      candidateStep: nextStep,
-    });
-  }
-
-  function persistCandidateWork(nextTaskIndex: number, nextAnswer: string, nextStep: CandidateStep) {
-    if (!candidate || !hiringNeed) {
-      return;
-    }
-    const task = hiringNeed.tasks[nextTaskIndex];
-    const nextDrafts = task ? { ...answerDrafts, [task.id]: nextAnswer } : answerDrafts;
-    setAnswerDrafts(nextDrafts);
-    saveCandidateSession({
-      candidate,
-      candidateForm,
-      hiringNeed,
-      shortlist,
-      taskIndex: nextTaskIndex,
-      answerDrafts: nextDrafts,
-      submissions: candidateSubmissions,
-      passport,
-      candidateStep: nextStep,
-    });
-  }
-
-  function restoreSessions() {
-    const candidateSession = readSession<CandidateSession>(candidateSessionKey);
-    if (candidateSession) {
-      setCandidate(candidateSession.candidate);
-      setCandidateForm(candidateSession.candidateForm);
-      setHiringNeed(candidateSession.hiringNeed);
-      setShortlist(candidateSession.shortlist);
-      setTaskIndex(candidateSession.taskIndex);
-      setAnswerDrafts(candidateSession.answerDrafts);
-      setCandidateSubmissions(candidateSession.submissions);
-      setPassport(candidateSession.passport);
-      setCandidateStep(candidateSession.candidateStep);
-      const task = candidateSession.hiringNeed.tasks[candidateSession.taskIndex];
-      setAnswer(task ? candidateSession.answerDrafts[task.id] ?? "" : "");
-      setSubmission(
-        candidateSession.submissions.find((item) => item.submission.task_id === task?.id) ?? null
-      );
-    }
-
-    const employerSession = readSession<EmployerSession>(employerSessionKey);
-    if (employerSession) {
-      setEmployer(employerSession.employer);
-      setEmployerForm(employerSession.employerForm);
-      setIntakeForm(employerSession.intakeForm);
-      setSelectedTrackId(employerSession.selectedTrackId);
-      setHiringNeed((current) => current ?? employerSession.hiringNeed);
-      setShortlist((current) => (current.length > 0 ? current : employerSession.shortlist));
-      setEmployerStep(employerSession.employerStep);
-    }
+    setView("landing");
+    window.history.replaceState({}, "", window.location.pathname);
   }
 
   return (
     <div className="app-shell">
-      {loading ? (
-        <div className="loading-overlay" role="status" aria-live="polite">
-          <span className="spinner" />
-          {loading}
-        </div>
-      ) : null}
-
+      <div className="toast-stack" aria-live="polite">
+        {loading ? <Toast tone="neutral" message={loading} /> : null}
+        {error ? <Toast tone="error" message={error} /> : null}
+      </div>
       <header className="topbar">
-        <button className="brand-button" onClick={() => setView("home")}>
+        <button className="brand" onClick={() => setView(session ? (session.user.role as View) : "landing")}>
           <img src="/sabixalogo.svg" alt="Sabixa" />
         </button>
-        <div className="topbar-actions">
-          <button onClick={startCandidate}>Candidate</button>
-          <button onClick={startEmployer}>Employer</button>
-          {view === "candidate" && candidate ? <button onClick={logoutCandidate}>Logout</button> : null}
-          {view === "employer" && employer ? <button onClick={logoutEmployer}>Logout</button> : null}
-        </div>
+        <nav>
+          <button onClick={() => openAuth("candidate")}>Candidate</button>
+          <button onClick={() => openAuth("employer")}>Employer</button>
+          {session ? <button onClick={logout}>Logout</button> : null}
+        </nav>
       </header>
 
-      {error ? <div className="notice notice-error">{error}</div> : null}
-
-      {view === "home" ? (
-        <main className="hero">
-          <h1>Proof-of-skill passports for customer support hiring.</h1>
-          <p>
-            Candidates complete real support tasks. AI scores the work and turns the result into
-            a shareable passport employers can review.
-          </p>
-          <div className="hero-actions">
-            <button className="primary" onClick={startCandidate}>
-              Get started as candidate
-            </button>
-            <button onClick={startEmployer}>Employer</button>
-          </div>
-        </main>
+      {view === "landing" ? <Landing onStart={openAuth} /> : null}
+      {view === "auth" ? (
+        <AuthView
+          mode={authMode}
+          role={authRole}
+          form={authForm}
+          onMode={setAuthMode}
+          onRole={setAuthRole}
+          onChange={setAuthForm}
+          onSubmit={submitAuth}
+        />
       ) : null}
-
       {view === "candidate" ? (
-        <main className="page">
-          <Progress
-            steps={["Onboarding", "Task", "Score", "Passport"]}
-            active={["onboarding", "task", "score", "passport"].indexOf(candidateStep)}
-          />
-
-          {candidateStep === "onboarding" ? (
-            <section className="panel narrow">
-              <h2>Candidate onboarding</h2>
-              <p className="muted">Start with the customer support associate task track.</p>
-              <label>
-                Job category
-                <select
-                  value={selectedTrackId}
-                  onChange={(event) => setSelectedTrackId(event.target.value)}
-                >
-                  {roleTrackOptions.map((track) => (
-                    <option key={track.id} value={track.id}>
-                      {track.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Full name
-                <input
-                  value={candidateForm.full_name}
-                  onChange={(event) =>
-                    setCandidateForm({ ...candidateForm, full_name: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Email
-                <input
-                  value={candidateForm.email}
-                  onChange={(event) =>
-                    setCandidateForm({ ...candidateForm, email: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Location
-                <input
-                  value={candidateForm.location}
-                  onChange={(event) =>
-                    setCandidateForm({ ...candidateForm, location: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Experience
-                <textarea
-                  rows={3}
-                  value={candidateForm.experience}
-                  onChange={(event) =>
-                    setCandidateForm({ ...candidateForm, experience: event.target.value })
-                  }
-                />
-              </label>
-              <button className="primary" onClick={loginCandidate} disabled={Boolean(loading)}>
-                {loading ? "Setting up..." : candidate ? "Continue session" : "Continue to task"}
-              </button>
-            </section>
-          ) : null}
-
-          {candidateStep === "task" && currentTask ? (
-            <section className="panel task-panel">
-              <div className="section-head">
-                <div>
-                  <span className="small-label">
-                    Task {taskIndex + 1} of {hiringNeed?.tasks.length ?? 1}
-                  </span>
-                  <h2>{currentTask.title}</h2>
-                </div>
-                <span className="time">{currentTask.time_limit_minutes} min</span>
-              </div>
-              <div className="task-brief">
-                <p>{currentTask.scenario}</p>
-                <p className="muted">{currentTask.instructions}</p>
-              </div>
-              <div className="rubric-list">
-                {currentTask.rubric.map((item) => (
-                  <div key={item.criterion}>
-                    <strong>{item.criterion}</strong>
-                    <span>{item.points} pts</span>
-                  </div>
-                ))}
-              </div>
-              <label>
-                Your answer
-                <textarea
-                  rows={9}
-                  value={answer}
-                  onChange={(event) => updateAnswer(event.target.value)}
-                  placeholder="Write your customer response here..."
-                />
-              </label>
-              <div className="button-row">
-                {taskIndex > 0 ? (
-                  <button onClick={goToPreviousTask} disabled={Boolean(loading)}>
-                    Previous task
-                  </button>
-                ) : null}
-                <button className="primary" onClick={submitTask} disabled={Boolean(loading)}>
-                  {loading ? "Scoring..." : "Submit for AI review"}
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          {candidateStep === "score" && submission ? (
-            <section className="panel">
-              <div className="score-header">
-                <div>
-                  <span className="small-label">AI score</span>
-                  <h2>{submission.evaluation.parsed_json.overall_score}/100</h2>
-                </div>
-                <span className="status-pill">
-                  {submission.evaluation.parsed_json.recommended_action}
-                </span>
-              </div>
-              <div className="review-grid">
-                <ReviewList title="What worked" items={submission.evaluation.parsed_json.strengths} />
-                <ReviewList title="Improve next" items={submission.evaluation.parsed_json.gaps} />
-              </div>
-              <div className="review-note">
-                <strong>AI review</strong>
-                <p>{submission.evaluation.parsed_json.confidence_reason}</p>
-              </div>
-              <div className="button-row">
-                <button onClick={returnToCurrentTask} disabled={Boolean(loading)}>
-                  Back to task
-                </button>
-                <button className="primary" onClick={continueAfterScore} disabled={Boolean(loading)}>
-                  {taskIndex + 1 < (hiringNeed?.tasks.length ?? 0) ? "Next task" : "Next"}
-                </button>
-                <button onClick={skipToPassport} disabled={Boolean(loading)}>
-                  View passport now
-                </button>
-              </div>
-            </section>
-          ) : null}
-
-          {candidateStep === "passport" && passport ? (
-            <section className="panel">
-              <div className="section-head">
-                <div>
-                  <span className="small-label">Shareable portfolio</span>
-                  <h2>Your skill passport</h2>
-                </div>
-                <button onClick={copyShareLink} disabled={Boolean(loading)}>
-                  {copied ? "Copied" : "Copy link"}
-                </button>
-              </div>
-              <PassportCard passport={passport} />
-              {candidateSubmissions.length > 0 ? (
-                <TaskHistory submissions={candidateSubmissions} />
-              ) : null}
-              <input className="share-input" readOnly value={passportUrl} />
-              <div className="button-row">
-                <button onClick={returnToCurrentTask} disabled={Boolean(loading)}>
-                  Back to tasks
-                </button>
-              </div>
-            </section>
-          ) : null}
-        </main>
+        <CandidateView
+          dashboard={candidateDashboard}
+          hiringNeed={hiringNeed}
+          currentTask={currentTask}
+          taskIndex={taskIndex}
+          answer={answer}
+          latestSubmission={latestSubmission}
+          passport={passport}
+          shareUrl={shareUrl}
+          copied={copied}
+          onStart={startAssessment}
+          onAnswer={setAnswer}
+          onSubmit={submitTask}
+          onNextTask={() => {
+            setTaskIndex((current) => current + 1);
+            setAnswer("");
+            setLatestSubmission(null);
+          }}
+          onCopy={copyShareLink}
+        />
       ) : null}
-
       {view === "employer" ? (
-        <main className="page">
-          {employerStep === "login" ? (
-            <section className="panel narrow">
-              <h2>Employer login</h2>
-              <p className="muted">
-                Choose the role category you are hiring for and review rated candidate passports.
-              </p>
-              <label>
-                Full name
-                <input
-                  value={employerForm.full_name}
-                  onChange={(event) =>
-                    setEmployerForm({ ...employerForm, full_name: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Work email
-                <input
-                  value={employerForm.email}
-                  onChange={(event) =>
-                    setEmployerForm({ ...employerForm, email: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Company
-                <input
-                  value={employerForm.company_name}
-                  onChange={(event) =>
-                    setEmployerForm({ ...employerForm, company_name: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Job category
-                <select
-                  value={selectedTrackId}
-                  onChange={(event) => setSelectedTrackId(event.target.value)}
-                >
-                  {roleTrackOptions.map((track) => (
-                    <option key={track.id} value={track.id}>
-                      {track.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button className="primary" onClick={loginEmployer} disabled={Boolean(loading)}>
-                {loading ? "Starting..." : "Continue"}
-              </button>
-            </section>
-          ) : null}
-
-          {employerStep === "intake" ? (
-            <section className="panel narrow intake-panel">
-              <h2>Hiring need intake</h2>
-              <p className="muted">
-                Describe the support problem behind the role. Sabixa uses this to generate the
-                assessment context.
-              </p>
-              <label>
-                Job category
-                <select
-                  value={selectedTrackId}
-                  onChange={(event) => setSelectedTrackId(event.target.value)}
-                >
-                  {roleTrackOptions.map((track) => (
-                    <option key={track.id} value={track.id}>
-                      {track.title}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Why are you hiring now?
-                <textarea
-                  rows={3}
-                  value={intakeForm.why_hiring_now}
-                  onChange={(event) =>
-                    setIntakeForm({ ...intakeForm, why_hiring_now: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Common customer issues
-                <textarea
-                  rows={3}
-                  value={intakeForm.common_issues}
-                  onChange={(event) =>
-                    setIntakeForm({ ...intakeForm, common_issues: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                First 30 days
-                <textarea
-                  rows={3}
-                  value={intakeForm.first_30_days}
-                  onChange={(event) =>
-                    setIntakeForm({ ...intakeForm, first_30_days: event.target.value })
-                  }
-                />
-              </label>
-              <label>
-                Weekly ticket volume
-                <input
-                  value={intakeForm.weekly_ticket_volume}
-                  onChange={(event) =>
-                    setIntakeForm({ ...intakeForm, weekly_ticket_volume: event.target.value })
-                  }
-                />
-              </label>
-              <button className="primary" onClick={submitHiringNeed} disabled={Boolean(loading)}>
-                {loading ? "Generating..." : "Generate shortlist view"}
-              </button>
-            </section>
-          ) : null}
-
-          {employerStep === "shortlist" ? (
-            <section className="employer-layout">
-              <div className="panel">
-                <div className="section-head">
-                  <div>
-                    <span className="small-label">Rated candidates</span>
-                    <h2>{currentTrack?.title ?? "Customer Support Associate"}</h2>
-                    {hiringNeed ? <p className="muted">{hiringNeed.role_problem_summary}</p> : null}
-                  </div>
-                  <button onClick={refreshShortlist} disabled={Boolean(loading)}>
-                    {loading ? "Refreshing..." : "Refresh"}
-                  </button>
-                </div>
-                {hiringNeed ? (
-                  <div className="skill-strip">
-                    {hiringNeed.skill_map.slice(0, 4).map((skill) => (
-                      <span key={skill.competency}>{skill.competency}</span>
-                    ))}
-                  </div>
-                ) : null}
-                <div className="candidate-list">
-                  {shortlist.length === 0 ? <p className="muted">No rated candidates yet.</p> : null}
-                  {shortlist.map((candidateItem) => (
-                    <button
-                      className="candidate-row"
-                      key={candidateItem.submission_id}
-                      onClick={() => openPassport(candidateItem.passport_id)}
-                      disabled={Boolean(loading)}
-                    >
-                      <span>
-                        <strong>{candidateItem.candidate_name}</strong>
-                        <small>{candidateItem.recommended_action}</small>
-                      </span>
-                      <span className="rating">
-                        {candidateItem.average_score}
-                        <small>{candidateItem.confidence_band}</small>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="panel">
-                <div className="section-head">
-                  <div>
-                    <span className="small-label">Passport</span>
-                    <h2>Candidate evidence</h2>
-                  </div>
-                </div>
-                {selectedPassport ? (
-                  <PassportCard passport={selectedPassport} />
-                ) : (
-                  <p className="muted">Select a candidate to view their passport.</p>
-                )}
-              </div>
-            </section>
-          ) : null}
-        </main>
+        <EmployerView
+          dashboard={employerDashboard}
+          hiringNeed={hiringNeed}
+          intakeForm={intakeForm}
+          shortlist={shortlist}
+          selectedPassport={selectedPassport}
+          trialTaskText={trialTaskText}
+          trialReview={trialReview}
+          onIntake={setIntakeForm}
+          onCreateNeed={createHiringNeed}
+          onOpenPassport={openPassport}
+          onTrialText={setTrialTaskText}
+          onReconcile={reconcileTrialTask}
+        />
       ) : null}
-
-      {view === "shared-passport" ? (
-        <main className="page">
-          <section className="panel">
-            <span className="small-label">Shared passport</span>
-            {selectedPassport ? (
-              <PassportCard passport={selectedPassport} />
-            ) : (
-              <p className="muted">Passport not found.</p>
-            )}
-          </section>
+      {view === "passport" ? (
+        <main className="page single">
+          <PassportCard passport={passport} publicView />
         </main>
       ) : null}
     </div>
   );
+
+  function openAuth(role: Role) {
+    if (session?.user.role === role) {
+      if (role === "employer") {
+        setSelectedPassport(null);
+      }
+      setView(role);
+      return;
+    }
+    setAuthRole(role);
+    setAuthMode("signup");
+    setView("auth");
+  }
 }
 
-function TaskHistory({ submissions }: { submissions: SubmissionResult[] }) {
+function Landing({ onStart }: { onStart: (role: Role) => void }) {
   return (
-    <div className="task-history">
-      <h3>Completed tasks</h3>
-      {submissions.map((item) => (
-        <div key={item.submission.id}>
-          <span>Task #{item.submission.task_id}</span>
-          <strong>{item.evaluation.parsed_json.overall_score}/100</strong>
-          <small>{item.evaluation.parsed_json.recommended_action}</small>
+    <main className="landing">
+      <section className="hero landing-hero">
+        <div className="hero-copy">
+          <span className="eyebrow">AI proof-of-skill hiring</span>
+          <h1>Customer support hiring, scored by real work.</h1>
+          <p>
+            Sabixa turns short support tasks into skill passports, ranked evidence and practical
+            improvement routes for entry-level talent.
+          </p>
+          <div className="actions">
+            <button className="primary" onClick={() => onStart("candidate")}>Start as candidate</button>
+            <button onClick={() => onStart("employer")}>Hire with Sabixa</button>
+          </div>
+        </div>
+      </section>
+      <section className="landing-proof">
+        <span>3-task support assessment</span>
+        <span>Rubric-based AI scoring</span>
+        <span>Shareable skill passport</span>
+        <span>Employer shortlist evidence</span>
+      </section>
+    </main>
+  );
+}
+
+function AuthView({
+  mode,
+  role,
+  form,
+  onMode,
+  onRole,
+  onChange,
+  onSubmit,
+}: {
+  mode: AuthMode;
+  role: Role;
+  form: typeof emptyAuth;
+  onMode: (mode: AuthMode) => void;
+  onRole: (role: Role) => void;
+  onChange: (form: typeof emptyAuth) => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <main className="page single">
+      <section className="panel auth-panel">
+        <div>
+          <span className="eyebrow">{role} account</span>
+          <h2>{mode === "login" ? "Log in" : "Create your account"}</h2>
+        </div>
+        <div className="segmented">
+          <button className={role === "candidate" ? "active" : ""} onClick={() => onRole("candidate")}>Candidate</button>
+          <button className={role === "employer" ? "active" : ""} onClick={() => onRole("employer")}>Employer</button>
+        </div>
+        {mode === "signup" ? (
+          <label>
+            Full name
+            <input value={form.full_name} onChange={(event) => onChange({ ...form, full_name: event.target.value })} />
+          </label>
+        ) : null}
+        <label>
+          Email
+          <input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} />
+        </label>
+        <label>
+          Password
+          <input type="password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} />
+        </label>
+        {mode === "signup" && role === "employer" ? (
+          <label>
+            Company
+            <input value={form.company_name} onChange={(event) => onChange({ ...form, company_name: event.target.value })} />
+          </label>
+        ) : null}
+        {mode === "signup" && role === "candidate" ? (
+          <label>
+            Experience
+            <textarea rows={3} value={form.experience} onChange={(event) => onChange({ ...form, experience: event.target.value })} />
+          </label>
+        ) : null}
+        <button className="primary" onClick={onSubmit}>{mode === "login" ? "Log in" : "Sign up"}</button>
+        <button className="text-button" onClick={() => onMode(mode === "login" ? "signup" : "login")}>
+          {mode === "login" ? "Need an account? Sign up" : "Already have an account? Log in"}
+        </button>
+      </section>
+    </main>
+  );
+}
+
+function CandidateView({
+  dashboard,
+  hiringNeed,
+  currentTask,
+  taskIndex,
+  answer,
+  latestSubmission,
+  passport,
+  shareUrl,
+  copied,
+  onStart,
+  onAnswer,
+  onSubmit,
+  onNextTask,
+  onCopy,
+}: {
+  dashboard: CandidateDashboard | null;
+  hiringNeed: HiringNeed | null;
+  currentTask: Task | null;
+  taskIndex: number;
+  answer: string;
+  latestSubmission: SubmissionResult | null;
+  passport: SkillPassport | null;
+  shareUrl: string;
+  copied: boolean;
+  onStart: () => void;
+  onAnswer: (answer: string) => void;
+  onSubmit: () => void;
+  onNextTask: () => void;
+  onCopy: () => void;
+}) {
+  const score = latestSubmission?.evaluation.parsed_json;
+  return (
+    <main className="page dashboard">
+      <section className="dashboard-head">
+        <div>
+          <span className="eyebrow">Candidate dashboard</span>
+          <h1>Build a support skill passport.</h1>
+        </div>
+        <button className="primary" onClick={onStart}>{hiringNeed ? "Restart assessment" : "Start assessment"}</button>
+      </section>
+      <section className="metric-row">
+        <Metric value={dashboard?.readiness.task_count ?? 0} label="tasks completed" />
+        <Metric value={dashboard?.readiness.average_score ?? "N/A"} label="average score" />
+        <Metric value={dashboard?.readiness.readiness_label ?? "No evidence"} label="readiness" />
+      </section>
+      <section className="two-column">
+        <div className="panel">
+          <span className="eyebrow">Assessment task</span>
+          {currentTask ? (
+            <TaskComposer task={currentTask} taskIndex={taskIndex} answer={answer} onAnswer={onAnswer} onSubmit={onSubmit} />
+          ) : (
+            <EmptyState title="No active task" body="Start the assessment to generate the customer support task pack." />
+          )}
+          {score ? (
+            <div className="score-block">
+              <strong>{score.overall_score}/100</strong>
+              <span>{score.recommended_action}</span>
+              <p>{score.confidence_reason}</p>
+              <ReviewList title="Why this score" items={[...score.strengths, ...score.gaps]} />
+              {hiringNeed && taskIndex + 1 < hiringNeed.tasks.length ? <button onClick={onNextTask}>Next task</button> : null}
+            </div>
+          ) : null}
+        </div>
+        <div className="panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Passport</span>
+              <h2>Shareable evidence card</h2>
+            </div>
+            {passport ? <button onClick={onCopy}>{copied ? "Copied" : "Copy link"}</button> : null}
+          </div>
+          <PassportCard passport={passport} />
+          {shareUrl ? <input className="share-input" readOnly value={shareUrl} /> : null}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function EmployerView({
+  dashboard,
+  hiringNeed,
+  intakeForm,
+  shortlist,
+  selectedPassport,
+  trialTaskText,
+  trialReview,
+  onIntake,
+  onCreateNeed,
+  onOpenPassport,
+  onTrialText,
+  onReconcile,
+}: {
+  dashboard: EmployerDashboard | null;
+  hiringNeed: HiringNeed | null;
+  intakeForm: IntakeAnswers;
+  shortlist: ShortlistCandidate[];
+  selectedPassport: SkillPassport | null;
+  trialTaskText: string;
+  trialReview: TrialTaskReview | null;
+  onIntake: (answers: IntakeAnswers) => void;
+  onCreateNeed: () => void;
+  onOpenPassport: (passportId: number) => void;
+  onTrialText: (value: string) => void;
+  onReconcile: () => void;
+}) {
+  return (
+    <main className="page dashboard">
+      <section className="dashboard-head">
+        <div>
+          <span className="eyebrow">Employer dashboard</span>
+          <h1>Candidate evidence for {dashboard?.employer.company_name ?? "your team"}.</h1>
+        </div>
+        <button className="primary" onClick={onCreateNeed}>Generate task pack</button>
+      </section>
+      <section className="employer-grid">
+        <div className="panel candidate-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Candidates</span>
+              <h2>Ranked by scored work samples</h2>
+            </div>
+            <span className="count-label">{shortlist.length} candidates</span>
+          </div>
+          <div className="candidate-list">
+            {shortlist.length === 0 ? (
+              <EmptyState
+                title="No scored candidates yet"
+                body="When candidates complete tasks, they appear here with score, confidence and passport evidence."
+              />
+            ) : null}
+            {shortlist.map((candidate) => (
+              <button className="candidate-row" key={candidate.passport_id} onClick={() => onOpenPassport(candidate.passport_id)}>
+                <span>
+                  <strong>{candidate.candidate_name}</strong>
+                  <small>
+                    {candidate.task_count} task{candidate.task_count === 1 ? "" : "s"} · {candidate.confidence_band} confidence · {candidate.recommended_action}
+                  </small>
+                </span>
+                <b>{candidate.average_score}</b>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="panel passport-panel">
+          <div className="section-head">
+            <div>
+              <span className="eyebrow">Candidate passport</span>
+              <h2>Profile and evidence</h2>
+            </div>
+          </div>
+          {selectedPassport ? (
+            <PassportCard passport={selectedPassport} />
+          ) : (
+            <EmptyState
+              title="Select a candidate"
+              body="Click a candidate from the list to review their scorecard, strengths, gaps and submitted evidence."
+            />
+          )}
+        </div>
+        <div className="panel">
+          <span className="eyebrow">Hiring need</span>
+          <IntakeForm form={intakeForm} onChange={onIntake} />
+        </div>
+        <div className="panel">
+          <span className="eyebrow">Assessment pack</span>
+          {hiringNeed ? <HiringNeedSummary need={hiringNeed} /> : <EmptyState title="No task pack yet" body="Generate a task pack from the hiring need above." />}
+        </div>
+        <div className="panel wide">
+          <span className="eyebrow">Trial task overlap</span>
+          <textarea rows={4} value={trialTaskText} onChange={(event) => onTrialText(event.target.value)} placeholder="Paste the company-specific trial task..." />
+          <button onClick={onReconcile}>Check overlap</button>
+          {trialReview ? (
+            <div className="trial-result">
+              <strong>{trialReview.overlap_score}% overlap</strong>
+              <span>{trialReview.recommendation}</span>
+              <p>{trialReview.suggested_adjustment}</p>
+            </div>
+          ) : null}
+        </div>
+      </section>
+    </main>
+  );
+}
+
+function TaskComposer({ task, taskIndex, answer, onAnswer, onSubmit }: { task: Task; taskIndex: number; answer: string; onAnswer: (answer: string) => void; onSubmit: () => void }) {
+  return (
+    <div className="task-composer">
+      <div className="section-head">
+        <div>
+          <h2>{task.title}</h2>
+          <p>{task.scenario}</p>
+        </div>
+        <span className="badge">Task {taskIndex + 1}</span>
+      </div>
+      <p className="muted">{task.instructions}</p>
+      <div className="rubric">
+        {task.rubric.map((item) => <span key={item.criterion}>{item.criterion}</span>)}
+      </div>
+      <textarea rows={9} value={answer} onChange={(event) => onAnswer(event.target.value)} placeholder="Write the exact response or ticket note you would send..." />
+      <button className="primary" onClick={onSubmit}>Submit for AI scoring</button>
+    </div>
+  );
+}
+
+function IntakeForm({ form, onChange }: { form: IntakeAnswers; onChange: (answers: IntakeAnswers) => void }) {
+  return (
+    <div className="form-grid">
+      <label>Why hiring now?<textarea rows={2} value={form.why_hiring_now} onChange={(event) => onChange({ ...form, why_hiring_now: event.target.value })} /></label>
+      <label>Common issues<textarea rows={2} value={form.common_issues} onChange={(event) => onChange({ ...form, common_issues: event.target.value })} /></label>
+      <label>First 30 days<textarea rows={2} value={form.first_30_days} onChange={(event) => onChange({ ...form, first_30_days: event.target.value })} /></label>
+      <label>Weekly volume<input value={form.weekly_ticket_volume} onChange={(event) => onChange({ ...form, weekly_ticket_volume: event.target.value })} /></label>
+    </div>
+  );
+}
+
+function HiringNeedSummary({ need }: { need: HiringNeed }) {
+  return (
+    <div className="need-summary">
+      <p>{need.role_problem_summary}</p>
+      <div className="rubric">
+        {need.skill_map.slice(0, 6).map((skill) => <span key={skill.competency}>{skill.competency}</span>)}
+      </div>
+      {need.tasks.map((task) => (
+        <div className="task-row" key={task.id}>
+          <strong>{task.title}</strong>
+          <small>{task.competencies.join(", ")}</small>
         </div>
       ))}
     </div>
   );
 }
 
-function PassportCard({ passport }: { passport: SkillPassport }) {
+function PassportCard({ passport, publicView = false }: { passport: SkillPassport | null; publicView?: boolean }) {
+  if (!passport) {
+    return <EmptyState title="No passport selected" body="A scored task will generate the passport card." />;
+  }
   const summary = passport.public_summary ?? {};
-  const scoreBreakdown = summary.score_breakdown ?? {};
-
+  const breakdown = summary.score_breakdown ?? {};
   return (
-    <div className="passport">
+    <article className={publicView ? "passport public" : "passport"}>
       <div className="passport-top">
         <div>
-          <h3>{summary.headline ?? "Customer support skill passport"}</h3>
-          <p>{summary.summary ?? "Generated from completed customer support task evidence."}</p>
+          <span className="eyebrow">Skill passport #{passport.id}</span>
+          <h2>{summary.headline ?? "Customer support skill passport"}</h2>
+          <p>{summary.summary ?? "Generated from customer support task evidence."}</p>
         </div>
-        <span>#{passport.id}</span>
+        <strong>{summary.overall_score ?? "N/A"}</strong>
       </div>
-      <div className="passport-score">
-        <div>
-          <small>Overall score</small>
-          <strong>{summary.overall_score ?? "N/A"}</strong>
-        </div>
-        <div>
-          <small>Confidence</small>
-          <strong>{summary.confidence_band ?? "N/A"}</strong>
-        </div>
-        <div>
-          <small>Action</small>
-          <strong>{summary.recommended_action ?? "Review"}</strong>
-        </div>
+      <div className="metric-row compact">
+        <Metric value={summary.confidence_band ?? "N/A"} label="confidence" />
+        <Metric value={summary.recommended_action ?? "Review"} label="action" />
+        <Metric value={summary.human_review_required ? "Yes" : "No"} label="human review" />
       </div>
-      {Object.keys(scoreBreakdown).length > 0 ? (
-        <div className="breakdown-grid">
-          {Object.entries(scoreBreakdown).map(([label, score]) => (
-            <div key={label}>
-              <span>{formatLabel(label)}</span>
-              <strong>{score}</strong>
-            </div>
-          ))}
+      {Object.keys(breakdown).length ? (
+        <div className="breakdown">
+          {Object.entries(breakdown).map(([label, value]) => <Metric key={label} value={value} label={formatLabel(label)} />)}
         </div>
       ) : null}
       <div className="passport-columns">
         <ReviewList title="Strengths" items={passport.strengths} />
         <ReviewList title="Gaps" items={passport.gaps} />
       </div>
-      {summary.evidence_quotes && summary.evidence_quotes.length > 0 ? (
-        <ReviewList title="Evidence notes" items={summary.evidence_quotes} />
-      ) : null}
-      <div className="portfolio-evidence">
-        <strong>Portfolio evidence</strong>
+      <ReviewList title="Evidence quotes" items={summary.evidence_quotes ?? []} />
+      <div className="evidence">
+        <strong>Submitted evidence</strong>
         <p>{passport.evidence_preview}</p>
       </div>
-      {summary.ethics_note ? <p className="ethics-note">{summary.ethics_note}</p> : null}
+      {summary.ethics_note ? <p className="ethics">{summary.ethics_note}</p> : null}
+    </article>
+  );
+}
+
+function Metric({ value, label }: { value: string | number; label: string }) {
+  return (
+    <div className="metric">
+      <strong>{value}</strong>
+      <span>{label}</span>
     </div>
   );
 }
 
-function ReviewList({ title, items }: { title: string; items: string[] }) {
+function Toast({ tone, message }: { tone: "neutral" | "error"; message: string }) {
+  return <div className={`toast ${tone}`}>{message}</div>;
+}
+
+function ReviewList({ title, items }: { title: string; items: Array<string | Record<string, unknown>> }) {
+  if (!items.length) return null;
   return (
-    <div>
+    <div className="review-list">
       <h3>{title}</h3>
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
+      <ul>{items.map((item) => {
+        const text = formatReviewItem(item);
+        return <li key={text}>{text}</li>;
+      })}</ul>
     </div>
   );
 }
 
-function Progress({ steps, active }: { steps: string[]; active: number }) {
+function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="progress">
-      {steps.map((step, index) => (
-        <span className={index <= active ? "done" : ""} key={step}>
-          {step}
-        </span>
-      ))}
+    <div className="empty">
+      <strong>{title}</strong>
+      <p>{body}</p>
     </div>
   );
-}
-
-function uniqueEmail(email: string) {
-  const [name, domain = "sabixa.africa"] = email.split("@");
-  return `${name}+${Date.now()}@${domain}`;
-}
-
-function updateShareUrl(passportId: number) {
-  window.history.replaceState({}, "", `${window.location.pathname}?passport=${passportId}`);
-}
-
-function clearShareUrl() {
-  window.history.replaceState({}, "", window.location.pathname);
 }
 
 function formatLabel(value: string) {
   return value.replaceAll("_", " ");
 }
 
-function upsertSubmission(items: SubmissionResult[], nextItem: SubmissionResult) {
-  const withoutTask = items.filter((item) => item.submission.task_id !== nextItem.submission.task_id);
-  return [...withoutTask, nextItem].sort((a, b) => a.submission.task_id - b.submission.task_id);
-}
-
-function saveCandidateSession(session: CandidateSession) {
-  localStorage.setItem(candidateSessionKey, JSON.stringify(session));
-}
-
-function saveEmployerSession(session: EmployerSession) {
-  localStorage.setItem(employerSessionKey, JSON.stringify(session));
-}
-
-function readSession<T>(key: string) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : null;
-  } catch {
-    localStorage.removeItem(key);
-    return null;
+function formatReviewItem(item: string | Record<string, unknown>) {
+  if (typeof item === "string") {
+    return item;
   }
+  const action = typeof item.action === "string" ? item.action : "";
+  const description = typeof item.description === "string" ? item.description : "";
+  const competency = typeof item.competency === "string" ? item.competency : "";
+  const evidence = typeof item.evidence === "string" ? item.evidence : "";
+  const gap = typeof item.gap === "string" ? item.gap : "";
+  return [competency || gap, description || action, evidence].filter(Boolean).join(": ");
 }
 
 function readError(error: unknown, fallback: string) {

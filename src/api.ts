@@ -1,7 +1,18 @@
 const defaultApiBase =
-  import.meta.env.VITE_API_BASE_URL?.trim() || "http://127.0.0.1:8000/api/v1";
+  import.meta.env.VITE_API_BASE_URL?.trim() || "http://127.0.0.1:8001/api/v1";
 
 export const API_BASE_URL = defaultApiBase.replace(/\/$/, "");
+
+let authToken = localStorage.getItem("sabixa:auth-token") ?? "";
+
+export function setAuthToken(token: string) {
+  authToken = token;
+  if (token) {
+    localStorage.setItem("sabixa:auth-token", token);
+  } else {
+    localStorage.removeItem("sabixa:auth-token");
+  }
+}
 
 export type RoleTrack = {
   id: string;
@@ -21,6 +32,22 @@ export type Candidate = {
   role_interest: string;
   visibility_status: string;
   created_at: string;
+};
+
+export type User = {
+  id: number;
+  full_name: string;
+  email: string | null;
+  role: "candidate" | "employer" | "admin";
+  created_at: string;
+};
+
+export type AuthSession = {
+  access_token: string;
+  token_type: "bearer";
+  user: User;
+  candidate: Candidate | null;
+  employer: EmployerProfile | null;
 };
 
 export type CandidateAuth = {
@@ -90,17 +117,27 @@ export type EvaluationOutput = {
   confidence_band: "Low" | "Medium" | "High";
   confidence_reason: string;
   recommended_action: string;
+  skill_scores?: Record<string, number>;
   rubric_breakdown: Array<{
     criterion: string;
     score: number;
     critical: boolean;
+    reason?: string;
+  }>;
+  quoted_evidence?: Array<{
+    quote: string;
+    criterion: string;
+    signal: "positive" | "negative";
+    note: string;
   }>;
   evidence_quotes: string[];
   strengths: string[];
-  gaps: string[];
-  improvement_plan: string[];
+  gaps: Array<string | { competency?: string; description?: string; evidence?: string }>;
+  improvement_plan: Array<string | { gap?: string; action?: string; resource_type?: string }>;
+  qa_checks?: Array<Record<string, unknown>>;
   human_review_required: boolean;
   ethics_note: string;
+  ethics_detail?: Record<string, unknown>;
 };
 
 export type SubmissionResult = {
@@ -141,6 +178,30 @@ export type SubmissionResult = {
     practice_focus: string[];
     retry_allowed: boolean;
   };
+};
+
+export type DashboardSubmission = SubmissionResult["submission"] & {
+  task?: Task;
+  passport?: SubmissionResult["passport"];
+};
+
+export type CandidateDashboard = {
+  candidate: Candidate;
+  submissions: DashboardSubmission[];
+  latest_passport: SkillPassport | null;
+  readiness: {
+    task_count: number;
+    average_score: number;
+    readiness_label: string;
+    recommended_action: string;
+  };
+};
+
+export type EmployerDashboard = {
+  employer: EmployerProfile;
+  hiring_needs: HiringNeed[];
+  active_hiring_need: HiringNeed | null;
+  shortlist: ShortlistCandidate[];
 };
 
 export type SkillPassport = {
@@ -247,12 +308,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     response = await fetch(`${API_BASE_URL}${path}`, {
       headers: {
         "Content-Type": "application/json",
+        ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}),
         ...headers,
       },
       ...rest,
     });
   } catch (error) {
-    throw new Error("Unable to load data right now. Please try again.");
+    throw Object.assign(new Error("Unable to load data right now. Please try again."), { cause: error });
   }
 
   if (!response.ok) {
@@ -268,6 +330,21 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
 }
 
 export const api = {
+  signup: (payload: {
+    role: "candidate" | "employer";
+    full_name: string;
+    email: string;
+    password: string;
+    company_name?: string;
+    location?: string;
+    experience?: string;
+    role_track_id?: string;
+  }) => request<AuthSession>("/auth/signup", { method: "POST", body: JSON.stringify(payload) }),
+  login: (payload: { email: string; password: string }) =>
+    request<AuthSession>("/auth/login", { method: "POST", body: JSON.stringify(payload) }),
+  me: () => request<AuthSession>("/auth/me"),
+  candidateDashboard: () => request<CandidateDashboard>("/me/candidate-dashboard"),
+  employerDashboard: () => request<EmployerDashboard>("/me/employer-dashboard"),
   roleTracks: () => request<RoleTrack[]>("/role-tracks"),
   mvpStatus: () => request<MvpStatus>("/mvp/status"),
   listFeedback: () => request<PrototypeFeedback[]>("/prototype-feedback"),
